@@ -33,8 +33,8 @@ import { resolveConfig } from './config.ts'
 import { ForeignTranscriptError, MAX_MENTIONS } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { extractForeignMentions } from './mention.ts'
-import { projectForeignTranscript } from './projection.ts'
-import type { ProjectedTranscript } from './projection.ts'
+import { projectForeignTranscript, resolveExchangeSelection } from './projection.ts'
+import type { ExchangeSelection, ProjectedTranscript } from './projection.ts'
 import { searchForeignSessions } from './search.ts'
 import type { ForeignSessionCandidate } from './search.ts'
 import { parseSpecifier, resolveForeignSession, splitScopeSuffix } from './specifier.ts'
@@ -58,9 +58,9 @@ export {
   resolveConfig as resolveForeignTranscriptConfig,
 } from './config.ts'
 export { FOREIGN_SESSION_SCHEME, extractForeignMentions } from './mention.ts'
-export { projectForeignTranscript } from './projection.ts'
+export { projectForeignTranscript, resolveExchangeSelection } from './projection.ts'
+export type { ExchangeSelection } from './projection.ts'
 export {
-  LATEST_SCOPE_SUFFIX,
   claudeProjectSlug,
   expandHome,
   parseSpecifier,
@@ -112,22 +112,39 @@ export const Config: z<Config> = z.object({
 
 const COMMAND_NAME = 'import-session'
 const COMMAND_DESCRIPTION = 'Import a Claude Code or Codex session transcript from this machine as conversation context'
-const COMMAND_HINT = 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots; --latest imports only the latest exchange'
+const COMMAND_HINT = 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots; --latest / --first N / --last N bound the import to part of the session'
 const COMMAND_LATEST_FLAG = '--latest'
-const COMMAND_USAGE = 'usage: /import-session [--latest] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end'
+const COMMAND_FIRST_FLAG = '--first'
+const COMMAND_LAST_FLAG = '--last'
+const COMMAND_USAGE = 'usage: /import-session [--latest | --first N | --last N] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end, --first N the opening N exchanges, --last N the most recent N exchanges'
 
 const TOOL_SPECIFIER_DESCRIPTION = 'Specifier to import: "claude" or "codex" for the newest session of the current project, or a path to a session .jsonl file under the configured roots.'
 const TOOL_QUERY_DESCRIPTION = 'Optional topic keywords. With "claude"/"codex", the best-matching session topic across all of that origin\'s sessions is imported instead of the newest one; the result lists the other matches.'
-const TOOL_SCOPE_DESCRIPTION = 'Import scope. "full" (default) imports the whole session transcript. "latest" imports only the latest exchange — the last user message through the end of the session — which fits questions like "what did it just do".'
-const TOOL_DESCRIPTION = 'Import one Claude Code or Codex session transcript from this machine as bounded text. Use it when the user points at work done in another agent (a Claude or Codex session) and wants to continue from it. Pass scope="latest" when the user asks what the other agent just did or wants only the most recent step; leave the default when they want the whole session\'s arc.'
+const TOOL_SCOPE_DESCRIPTION = 'Import scope. "full" (default) imports the whole session transcript. "latest" imports only the latest exchange — the last user message through the end of the session — which fits questions like "what did it just do". "first" imports the opening exchanges and "last" the most recent ones, each requiring the exchanges count.'
+const TOOL_EXCHANGES_DESCRIPTION = 'Exchange count for scope "first"/"last": how many exchanges to import, where one exchange is a user message plus the assistant reply and tool calls that follow it. Required with those scopes; must not accompany "full"/"latest".'
+const TOOL_DESCRIPTION = 'Import one Claude Code or Codex session transcript from this machine as bounded text. Use it when the user points at work done in another agent (a Claude or Codex session) and wants to continue from it. Pass scope="latest" when the user asks what the other agent just did, scope="first"/"last" with an exchanges count for a bounded window of exchanges, and leave the default when they want the whole session\'s arc.'
 const SEARCH_TOOL_DESCRIPTION = 'Search Claude Code or Codex session logs by topic keywords and return the matching sessions WITHOUT importing them. When the user describes prior work in another agent only vaguely, search first, present the matches (through ask_user_question when the user should choose), then call import_foreign_session with the chosen path(s).'
 
 /** One prepared import shared by all three surfaces. */
 interface PreparedImport {
   readonly origin: ForeignTranscriptOrigin
   readonly path: string
-  readonly scope: ForeignTranscriptScope
+  readonly selection: ExchangeSelection
   readonly projected: ProjectedTranscript
+}
+
+/**
+ * Flatten one selection into the durable scope kind plus its count field.
+ * @param selection - validated scope selection.
+ * @returns the flat `scope` and, for a counted selection, its `exchanges`.
+ */
+function scopeFields(selection: ExchangeSelection): {
+  scope: ForeignTranscriptScope
+  exchanges?: number
+} {
+  return selection.kind === 'count'
+    ? { scope: selection.direction, exchanges: selection.exchanges }
+    : { scope: selection.kind }
 }
 
 /**
@@ -136,8 +153,11 @@ interface PreparedImport {
  * @param cwd - working directory for latest-session lookup and relative paths.
  * @param config - validated configuration.
  * @param signal - cancellation signal of the calling surface.
- * @param scope - how much of the session to carry.
+ * @param scope - the requested import scope kind.
+ * @param exchanges - the requested exchange count, when the caller supplied one.
  * @returns the import plus its durable source metadata inputs.
+ * @throws {@link ForeignTranscriptError} with `FOREIGN_TRANSCRIPT_INVALID_SPECIFIER` when the
+ * scope kind and the exchange count do not pair.
  */
 async function prepareImport(
   specifier: string,
@@ -145,11 +165,13 @@ async function prepareImport(
   config: ResolvedConfig,
   signal: AbortSignal | undefined,
   scope: ForeignTranscriptScope,
+  exchanges: number | undefined,
 ): Promise<PreparedImport> {
   const { origin, path, transcript } = await resolveForeignSession({ specifier, cwd, config, signal })
+  const selection = resolveExchangeSelection(scope, exchanges)
   const label = basename(path)
-  const projected = projectForeignTranscript(transcript, label, config.maxTranscriptBytes, scope)
-  return { origin, path, scope, projected }
+  const projected = projectForeignTranscript(transcript, label, config.maxTranscriptBytes, selection)
+  return { origin, path, selection, projected }
 }
 
 /** One best-match import plus the other topic candidates found beside it. */
@@ -165,7 +187,8 @@ interface SearchedImport {
  * @param cwd - working directory for relative paths.
  * @param config - validated configuration.
  * @param signal - cancellation signal of the calling surface.
- * @param scope - how much of the matched session to carry.
+ * @param scope - the requested import scope kind.
+ * @param exchanges - the requested exchange count, when the caller supplied one.
  * @returns the best match prepared for import plus every returned candidate.
  * @throws {@link ForeignTranscriptError} with `FOREIGN_TRANSCRIPT_NOT_FOUND` when nothing matches.
  */
@@ -176,6 +199,7 @@ async function searchAndPrepare(
   config: ResolvedConfig,
   signal: AbortSignal | undefined,
   scope: ForeignTranscriptScope,
+  exchanges: number | undefined,
 ): Promise<SearchedImport> {
   const candidates = await searchForeignSessions({ origin, query, config, signal })
   const best = candidates[0]
@@ -185,7 +209,7 @@ async function searchAndPrepare(
       'FOREIGN_TRANSCRIPT_NOT_FOUND',
     )
   }
-  return { prepared: await prepareImport(best.path, cwd, config, signal, scope), candidates }
+  return { prepared: await prepareImport(best.path, cwd, config, signal, scope, exchanges), candidates }
 }
 
 /**
@@ -270,7 +294,7 @@ async function askWhichSessions(
 /**
  * Build the durable source record for one prepared import.
  * @param prepared - the prepared import.
- * @returns the message source naming origin, path, and retention facts.
+ * @returns the message source naming origin, path, scope, and retention facts.
  */
 function foreignSource(prepared: PreparedImport): ForeignTranscriptSource {
   return {
@@ -280,7 +304,7 @@ function foreignSource(prepared: PreparedImport): ForeignTranscriptSource {
     origin: prepared.origin,
     path: prepared.path,
     label: basename(prepared.path),
-    scope: prepared.scope,
+    ...scopeFields(prepared.selection),
     totalItems: prepared.projected.totalItems,
     omittedBytes: prepared.projected.omittedBytes,
   }
@@ -295,9 +319,12 @@ function renderSuccess(prepared: PreparedImport): string {
   const omission = prepared.projected.omittedBytes > 0
     ? ` (omitted ${prepared.projected.omittedBytes} bytes from the middle)`
     : ''
-  const carried = prepared.scope === 'latest'
-    ? `the latest exchange (${prepared.projected.totalItems} transcript items)`
-    : `${prepared.projected.totalItems} transcript items`
+  const selection = prepared.selection
+  const carried = selection.kind === 'full'
+    ? `${prepared.projected.totalItems} transcript items`
+    : selection.kind === 'latest'
+      ? `the latest exchange (${prepared.projected.totalItems} transcript items)`
+      : `the ${selection.direction} ${selection.exchanges} exchanges (${prepared.projected.totalItems} transcript items)`
   return `Imported ${carried}${omission} from ${prepared.origin} session ${prepared.path}.`
 }
 
@@ -347,8 +374,32 @@ export function apply(ctx: Context, config: Config): void {
     input: { hint: COMMAND_HINT },
     handler: async ({ agent, rawInput, signal }): Promise<CommandResult> => {
       const tokens = rawInput.trim().split(/\s+/u).filter(token => token !== '')
-      const scope: ForeignTranscriptScope = tokens.includes(COMMAND_LATEST_FLAG) ? 'latest' : 'full'
-      const [firstWord, ...rest] = tokens.filter(token => token !== COMMAND_LATEST_FLAG)
+      let scope: ForeignTranscriptScope = 'full'
+      let exchanges: number | undefined
+      const locating: string[] = []
+      for (let index = 0; index < tokens.length; index++) {
+        const token = tokens[index] as string
+        if (token !== COMMAND_LATEST_FLAG && token !== COMMAND_FIRST_FLAG && token !== COMMAND_LAST_FLAG) {
+          locating.push(token)
+          continue
+        }
+        if (scope !== 'full') {
+          return { kind: 'error', text: 'choose one scope flag: --latest, --first N, or --last N' }
+        }
+        if (token === COMMAND_LATEST_FLAG) {
+          scope = 'latest'
+          continue
+        }
+        const rawCount = tokens[index + 1]
+        const count = rawCount === undefined ? Number.NaN : Number(rawCount)
+        if (!Number.isSafeInteger(count) || count < 1) {
+          return { kind: 'error', text: `${token} needs a positive integer exchange count, e.g. ${token} 3` }
+        }
+        scope = token === COMMAND_FIRST_FLAG ? 'first' : 'last'
+        exchanges = count
+        index++
+      }
+      const [firstWord, ...rest] = locating
       const specifier = firstWord ?? ''
       const query = rest.join(' ')
       if (specifier === '') return { kind: 'error', text: COMMAND_USAGE }
@@ -371,10 +422,10 @@ export function apply(ctx: Context, config: Config): void {
             ? [candidates[0] as ForeignSessionCandidate]
             : await askWhichSessions(ctx, parsed.origin, query, candidates, signal) ?? [candidates[0] as ForeignSessionCandidate]
           preparedImports = await Promise.all(chosen.map(
-            candidate => prepareImport(candidate.path, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope),
+            candidate => prepareImport(candidate.path, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope, exchanges),
           ))
         } else {
-          preparedImports = [await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope)]
+          preparedImports = [await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope, exchanges)]
         }
       } catch (error: unknown) {
         if (error instanceof ForeignTranscriptError) return { kind: 'error', text: error.message }
@@ -415,8 +466,8 @@ export function apply(ctx: Context, config: Config): void {
     }
     const contexts: UserMessage[] = []
     for (const mention of specifiers) {
-      const { specifier, scope } = splitScopeSuffix(mention)
-      const prepared = await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope)
+      const { specifier, scope, exchanges } = splitScopeSuffix(mention)
+      const prepared = await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope, exchanges)
       contexts.push(createUserMessage({
         content: [{ type: 'text', text: prepared.projected.text }],
         source: foreignSource(prepared),
@@ -431,7 +482,8 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       specifier: { type: 'string', required: true, description: TOOL_SPECIFIER_DESCRIPTION },
       query: { type: 'string', description: TOOL_QUERY_DESCRIPTION },
-      scope: { type: 'string', enum: ['full', 'latest'], description: TOOL_SCOPE_DESCRIPTION },
+      scope: { type: 'string', enum: ['full', 'latest', 'first', 'last'], description: TOOL_SCOPE_DESCRIPTION },
+      exchanges: { type: 'number', description: TOOL_EXCHANGES_DESCRIPTION },
     },
     output: {
       schema: {
@@ -440,7 +492,8 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           origin: { type: 'string', required: true, enum: ['claude', 'codex'] },
           path: { type: 'string', required: true },
-          scope: { type: 'string', required: true, enum: ['full', 'latest'] },
+          scope: { type: 'string', required: true, enum: ['full', 'latest', 'first', 'last'] },
+          exchanges: { type: 'integer' },
           text: { type: 'string', required: true },
           totalItems: { type: 'integer', required: true },
           omittedBytes: { type: 'integer', required: true },
@@ -477,12 +530,12 @@ export function apply(ctx: Context, config: Config): void {
         if (parsed.kind === 'path') {
           throw new Error('import_foreign_session: query works with the claude/codex keywords, not with an explicit path')
         }
-        const searched = await searchAndPrepare(parsed.origin, query, cwd, resolved, exec.signal, scope)
+        const searched = await searchAndPrepare(parsed.origin, query, cwd, resolved, exec.signal, scope, args.exchanges)
         const best = searched.candidates[0] as ForeignSessionCandidate
         return {
           origin: searched.prepared.origin,
           path: searched.prepared.path,
-          scope: searched.prepared.scope,
+          ...scopeFields(searched.prepared.selection),
           text: searched.prepared.projected.text,
           totalItems: searched.prepared.projected.totalItems,
           omittedBytes: searched.prepared.projected.omittedBytes,
@@ -490,11 +543,11 @@ export function apply(ctx: Context, config: Config): void {
           alternatives: searched.candidates.slice(1).map(candidate => ({ path: candidate.path, topic: candidate.topic })),
         }
       }
-      const prepared = await prepareImport(args.specifier, cwd, resolved, exec.signal, scope)
+      const prepared = await prepareImport(args.specifier, cwd, resolved, exec.signal, scope, args.exchanges)
       return {
         origin: prepared.origin,
         path: prepared.path,
-        scope: prepared.scope,
+        ...scopeFields(prepared.selection),
         text: prepared.projected.text,
         totalItems: prepared.projected.totalItems,
         omittedBytes: prepared.projected.omittedBytes,
@@ -504,7 +557,9 @@ export function apply(ctx: Context, config: Config): void {
       card: 'generic',
       title: 'Import foreign session',
       kind: 'other',
-      rawInput: args.scope === 'latest' ? `${args.specifier} (latest exchange)` : args.specifier,
+      rawInput: args.scope === undefined || args.scope === 'full'
+        ? args.specifier
+        : `${args.specifier} (${args.scope === 'latest' ? 'latest exchange' : `${args.scope} ${args.exchanges ?? '?'} exchanges`})`,
     }),
   }))
 

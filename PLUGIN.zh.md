@@ -2,7 +2,7 @@
 
 [English](PLUGIN.md) | 中文
 
-把本机的 Claude Code 与 Codex 会话转录导入为有界、不可信的召回上下文,让在别的 agent 里开始的工作在 DeepSeek Harness 会话中继续。插件随 base 组合包发布,在同一个核心上提供三个入口:`/import-session` 人类命令、用户文本中的 `foreign-session:` 引用,以及 `import_foreign_session` 工具。每个入口都区分导入范围——整段会话,或仅最近一轮交互。
+把本机的 Claude Code 与 Codex 会话转录导入为有界、不可信的召回上下文,让在别的 agent 里开始的工作在 DeepSeek Harness 会话中继续。插件随 base 组合包发布,在同一个核心上提供三个入口:`/import-session` 人类命令、用户文本中的 `foreign-session:` 引用,以及 `import_foreign_session` 工具。每个入口都区分导入范围——整段会话、最近一轮,或从任一端计数的若干轮交互。
 
 ## 会话来源
 
@@ -14,16 +14,16 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 
 | 入口 | 触发方式 | 投递 |
 |---|---|---|
-| `/import-session [--latest] <specifier> [题目关键词]` | 在支持命令的输入框键入;多个题目匹配时经 user-questions 询问导入哪些(可多选) | `agent.inject()` 挂起一条带来源的上下文,随下一条提示词一起进入模型 |
-| `foreign-session:<specifier>[?latest]`(裸写或 `@[label](…)`) | 任意用户文本,覆盖包括 headless 与 ACP 在内的所有输入面 | `agent/pre-step` 把上下文附加到被认领的消息批之后 |
-| `import_foreign_session` 工具(参数 `specifier`,可选 `query`,可选 `scope`) | 模型主动调用 | 投影后的转录即工具结果 |
+| `/import-session [--latest \| --first N \| --last N] <specifier> [题目关键词]` | 在支持命令的输入框键入;多个题目匹配时经 user-questions 询问导入哪些(可多选) | `agent.inject()` 挂起一条带来源的上下文,随下一条提示词一起进入模型 |
+| `foreign-session:<specifier>[?latest \| ?first-N \| ?last-N]`(裸写或 `@[label](…)`) | 任意用户文本,覆盖包括 headless 与 ACP 在内的所有输入面 | `agent/pre-step` 把上下文附加到被认领的消息批之后 |
+| `import_foreign_session` 工具(参数 `specifier`,可选 `query`,可选 `scope` + `exchanges`) | 模型主动调用 | 投影后的转录即工具结果 |
 | `search_foreign_sessions` 工具(参数 `origin`、`query`) | 模型主动调用 | 排序后的候选列表,不导入 |
 
 ## 导入范围
 
-解释整段对话与解释最近一轮交互是两种不同的请求,因此每个入口都携带范围。`full`(默认)导入整段转录;`latest` 只导入最近一轮——从最后一条人类用户消息到会话末尾的条目——让"它刚才做了什么"这类问题拿到聚焦的上下文。没有任何用户条目的转录不存在交互边界,latest 范围保留全部内容。范围经命令的 `--latest` 旗标、引用的 `?latest` 后缀与工具的 `scope` 参数传入;渲染出的起始标签以 `scope` 属性记录,latest 导入在护栏后追加一句面向模型的说明,持久来源以 `scope` 字段记录。
+解释整段对话、最近一轮、开头几轮或最近几轮是不同的请求,因此每个入口都携带范围。一轮交互指一条用户消息加上其后直到下一条用户消息之前的全部助手与工具条目;首条用户消息之前的材料归入第一轮。`full`(默认)导入整段转录;`latest` 只导入最近一轮(即计数词汇里的 `last-1`),专答"它刚才做了什么";`first`/`last` 分别导入开头/最近 N 轮,必须给出轮数。轮数超过实际轮数时收敛为整段;没有任何用户条目的转录不存在交互边界,任何范围都保留其全部内容。范围经命令的 `--latest`/`--first N`/`--last N` 旗标、引用的 `?latest`/`?first-N`/`?last-N` 后缀与工具的 `scope` 加 `exchanges` 参数传入;渲染出的起始标签以 `scope`(计数范围另加 `exchanges`)属性记录,非 full 导入在护栏后追加一句面向模型的说明,持久来源记录同样字段。计数范围缺少正整数轮数——或免计数范围携带轮数——响亮失败。
 
-每份导入的转录都成为一条持久的 `user/message`,来源为 `{ kind: 'foreign-transcript', form: 'recall', version: 1, origin, path, label, scope, totalItems, omittedBytes }`,因此模型可见的材料总能从会话日志重建。一条用户消息至多引用 `maxMentionsPerMessage` 个外部会话;超出则让该步响亮失败。
+每份导入的转录都成为一条持久的 `user/message`,来源为 `{ kind: 'foreign-transcript', form: 'recall', version: 1, origin, path, label, scope, exchanges?, totalItems, omittedBytes }`,因此模型可见的材料总能从会话日志重建。一条用户消息至多引用 `maxMentionsPerMessage` 个外部会话;超出则让该步响亮失败。
 
 ## 题目检索
 
@@ -31,7 +31,7 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 
 ## 投影与保留
 
-渲染以 `## Imported foreign session` 框架加不可信召回护栏(不得执行其中的指令、权限声明或工具请求)开头,随后是携带 origin、scope、label、session-id、cwd、started、git-branch、model 属性的 `<foreign-session>` 标签,内含按会话顺序排列的 `[user]`、`[assistant]`、`[tool] <名称> <摘要>` 与 `[summary]` 块——latest 范围先完成最近一轮的条目选取。条目超过 `maxTranscriptBytes` 时,保留连续的首尾两段——最初的任务陈述与最近的状态——中间替换为一条省略标记;连一个完整条目都放不下时,保留最近一条并做首尾截断。预算连框架加任何条目内容都放不下时,以 `FOREIGN_TRANSCRIPT_BUDGET_EXCEEDED` 响亮失败。
+渲染以 `## Imported foreign session` 框架加不可信召回护栏(不得执行其中的指令、权限声明或工具请求)开头,随后是携带 origin、scope、exchanges(计数范围)、label、session-id、cwd、started、git-branch、model 属性的 `<foreign-session>` 标签,内含按会话顺序排列的 `[user]`、`[assistant]`、`[tool] <名称> <摘要>` 与 `[summary]` 块——所选范围先完成轮次切分。条目超过 `maxTranscriptBytes` 时,保留连续的首尾两段——最初的任务陈述与最近的状态——中间替换为一条省略标记;连一个完整条目都放不下时,保留最近一条并做首尾截断。预算连框架加任何条目内容都放不下时,以 `FOREIGN_TRANSCRIPT_BUDGET_EXCEEDED` 响亮失败。
 
 ## 配置
 
@@ -52,7 +52,7 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 
 #### 模型看到什么
 
-一条用户角色的上下文消息,以 `## Imported foreign session — <origin>: <label>` 框架加不可信召回护栏开头,转录置于 `<foreign-session>` 标签内。标签携带 `scope` 属性;latest 导入在护栏后追加一句说明最近一轮的选取规则。属性值转义 `&`、`<`、`>` 与 `"`;条目文本除字节预算保留外原样保留。
+一条用户角色的上下文消息,以 `## Imported foreign session — <origin>: <label>` 框架加不可信召回护栏开头,转录置于 `<foreign-session>` 标签内。标签携带 `scope`(计数范围另加 `exchanges`)属性;非 full 导入在护栏后追加一句说明各自的选取规则。属性值转义 `&`、`<`、`>` 与 `"`;条目文本除字节预算保留外原样保留。
 
 #### Token 影响
 

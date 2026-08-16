@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { extractForeignMentions } from '../src/mention.ts'
-import { projectForeignTranscript } from '../src/projection.ts'
+import { projectForeignTranscript, resolveExchangeSelection } from '../src/projection.ts'
 import type { ForeignTranscript, ForeignTranscriptItem } from '../src/types.ts'
 
 function transcript(items: readonly ForeignTranscriptItem[]): ForeignTranscript {
@@ -14,6 +14,12 @@ function transcript(items: readonly ForeignTranscriptItem[]): ForeignTranscript 
     items,
   }
 }
+
+/** Validated selections reused across the projection tests. */
+const FULL = { kind: 'full' } as const
+const LATEST = { kind: 'latest' } as const
+const first = (exchanges: number) => ({ kind: 'count', direction: 'first', exchanges }) as const
+const last = (exchanges: number) => ({ kind: 'count', direction: 'last', exchanges }) as const
 
 describe('extractForeignMentions', () => {
   it('extracts bare tokens and markdown links, deduplicated in order', () => {
@@ -45,7 +51,7 @@ describe('projectForeignTranscript', () => {
   ]
 
   it('renders every item inside untrusted framing within the budget', () => {
-    const projected = projectForeignTranscript(transcript(SMALL), 'session-a.jsonl', 65_536, 'full')
+    const projected = projectForeignTranscript(transcript(SMALL), 'session-a.jsonl', 65_536, FULL)
     expect(projected.totalItems).toBe(5)
     expect(projected.omittedBytes).toBe(0)
     expect(projected.text).toBe(
@@ -74,7 +80,7 @@ describe('projectForeignTranscript', () => {
       { kind: 'tool-call', name: 'Read', brief: '{"file_path":"a.ts"}' },
       { kind: 'summary', text: 'Earlier compacted work' },
     ]
-    const projected = projectForeignTranscript(transcript(twoExchanges), 'session-a.jsonl', 65_536, 'latest')
+    const projected = projectForeignTranscript(transcript(twoExchanges), 'session-a.jsonl', 65_536, LATEST)
     expect(projected.totalItems).toBe(4)
     expect(projected.omittedBytes).toBe(0)
     expect(projected.text).toContain('scope="latest"')
@@ -85,12 +91,57 @@ describe('projectForeignTranscript', () => {
     expect(projected.text).not.toContain('Harness ready')
   })
 
+  it('selects the opening and closing counted exchanges', () => {
+    const fourExchanges: readonly ForeignTranscriptItem[] = [
+      { kind: 'user', text: 'Round one' },
+      { kind: 'assistant', text: 'One done.' },
+      { kind: 'user', text: 'Round two' },
+      { kind: 'tool-call', name: 'Read', brief: '{"file_path":"b.ts"}' },
+      { kind: 'assistant', text: 'Two done.' },
+      { kind: 'user', text: 'Round three' },
+      { kind: 'assistant', text: 'Three done.' },
+      { kind: 'user', text: 'Round four' },
+      { kind: 'assistant', text: 'Four done.' },
+    ]
+    const opening = projectForeignTranscript(transcript(fourExchanges), 's.jsonl', 65_536, first(2))
+    expect(opening.totalItems).toBe(5)
+    expect(opening.text).toContain('scope="first" exchanges="2"')
+    expect(opening.text).toContain('Scope: first 2 exchanges')
+    expect(opening.text).toContain('[user]\nRound two')
+    expect(opening.text).not.toContain('Round three')
+
+    const closing = projectForeignTranscript(transcript(fourExchanges), 's.jsonl', 65_536, last(2))
+    expect(closing.totalItems).toBe(4)
+    expect(closing.text).toContain('scope="last" exchanges="2"')
+    expect(closing.text).toContain('Scope: last 2 exchanges')
+    expect(closing.text).toContain('[user]\nRound three')
+    expect(closing.text).not.toContain('Round two')
+  })
+
+  it('clamps a count past the available exchanges to the whole transcript', () => {
+    const twoRounds: readonly ForeignTranscriptItem[] = [
+      { kind: 'user', text: 'Round one' },
+      { kind: 'assistant', text: 'One done.' },
+      { kind: 'user', text: 'Round two' },
+      { kind: 'assistant', text: 'Two done.' },
+    ]
+    expect(projectForeignTranscript(transcript(twoRounds), 's.jsonl', 65_536, first(9)).totalItems).toBe(4)
+    expect(projectForeignTranscript(transcript(twoRounds), 's.jsonl', 65_536, last(9)).totalItems).toBe(4)
+  })
+
+  it('rejects a counted scope without a positive count and a count-free scope with one', () => {
+    expect(() => resolveExchangeSelection('first', 0)).toThrow(/requires exchanges/u)
+    expect(() => resolveExchangeSelection('last', undefined)).toThrow(/requires exchanges/u)
+    expect(() => resolveExchangeSelection('full', 2)).toThrow(/takes no exchanges/u)
+    expect(resolveExchangeSelection('latest', undefined)).toEqual({ kind: 'latest' })
+  })
+
   it('keeps a user-less transcript whole under the latest scope', () => {
     const userless: readonly ForeignTranscriptItem[] = [
       { kind: 'assistant', text: 'Standing report.' },
       { kind: 'summary', text: 'Compacted continuation' },
     ]
-    const projected = projectForeignTranscript(transcript(userless), 'session-a.jsonl', 65_536, 'latest')
+    const projected = projectForeignTranscript(transcript(userless), 'session-a.jsonl', 65_536, LATEST)
     expect(projected.totalItems).toBe(2)
     expect(projected.text).toContain('Standing report.')
     expect(projected.text).toContain('Compacted continuation')
@@ -105,7 +156,7 @@ describe('projectForeignTranscript', () => {
     for (let index = 0; index < 29; index++) {
       items.push({ kind: 'assistant', text: `turn ${index}: ${'x'.repeat(60)}` })
     }
-    const projected = projectForeignTranscript(transcript(items), 'big.jsonl', 2_000, 'latest')
+    const projected = projectForeignTranscript(transcript(items), 'big.jsonl', 2_000, last(1))
     expect(Buffer.byteLength(projected.text, 'utf8')).toBeLessThanOrEqual(2_000)
     expect(projected.totalItems).toBe(30)
     expect(projected.omittedBytes).toBeGreaterThan(0)
@@ -116,7 +167,7 @@ describe('projectForeignTranscript', () => {
 
   it('escapes attribute values and omits absent attributes', () => {
     const bare: ForeignTranscript = { origin: 'codex', sessionId: '', items: [] }
-    const projected = projectForeignTranscript(bare, 'we"ird&<name>.jsonl', 4_096, 'full')
+    const projected = projectForeignTranscript(bare, 'we"ird&<name>.jsonl', 4_096, FULL)
     expect(projected.text).toContain('<foreign-session origin="codex" scope="full" label="we&quot;ird&amp;&lt;name&gt;.jsonl">')
   })
 
@@ -125,7 +176,7 @@ describe('projectForeignTranscript', () => {
     for (let index = 0; index < 40; index++) {
       items.push({ kind: 'user', text: `turn ${index}: ${'x'.repeat(60)}` })
     }
-    const projected = projectForeignTranscript(transcript(items), 'big.jsonl', 3_000, 'full')
+    const projected = projectForeignTranscript(transcript(items), 'big.jsonl', 3_000, FULL)
     expect(Buffer.byteLength(projected.text, 'utf8')).toBeLessThanOrEqual(3_000)
     expect(projected.totalItems).toBe(40)
     expect(projected.omittedBytes).toBeGreaterThan(0)
@@ -140,7 +191,7 @@ describe('projectForeignTranscript', () => {
       { kind: 'user', text: `the opening task statement ${'w'.repeat(2_000)}` },
       { kind: 'assistant', text: `final state ${'y'.repeat(2_000)}` },
     ]
-    const projected = projectForeignTranscript(transcript(items), 'tiny.jsonl', 1_400, 'full')
+    const projected = projectForeignTranscript(transcript(items), 'tiny.jsonl', 1_400, FULL)
     expect(Buffer.byteLength(projected.text, 'utf8')).toBeLessThanOrEqual(1_400)
     expect(projected.text).toContain('[… omitted 1 transcript items …]')
     expect(projected.text).toMatch(/\[… omitted \d+ UTF-8 bytes …\]/u)
@@ -153,7 +204,7 @@ describe('projectForeignTranscript', () => {
     const items: readonly ForeignTranscriptItem[] = [
       { kind: 'user', text: 'z'.repeat(3_000) },
     ]
-    const projected = projectForeignTranscript(transcript(items), 'one.jsonl', 1_500, 'full')
+    const projected = projectForeignTranscript(transcript(items), 'one.jsonl', 1_500, FULL)
     expect(Buffer.byteLength(projected.text, 'utf8')).toBeLessThanOrEqual(1_500)
     expect(projected.text).not.toMatch(/omitted \d+ transcript items/u)
     expect(projected.text).toMatch(/\[… omitted \d+ UTF-8 bytes …\]/u)
@@ -161,12 +212,12 @@ describe('projectForeignTranscript', () => {
 
   it('rejects budgets that cannot hold the framing or even one truncated item', () => {
     const framing = Buffer.byteLength(
-      projectForeignTranscript(transcript([]), 'x.jsonl', 65_536, 'full').text,
+      projectForeignTranscript(transcript([]), 'x.jsonl', 65_536, FULL).text,
       'utf8',
     )
-    expect(() => projectForeignTranscript(transcript(SMALL), 'x.jsonl', framing + 20, 'full'))
+    expect(() => projectForeignTranscript(transcript(SMALL), 'x.jsonl', framing + 20, FULL))
       .toThrow(/cannot hold the transcript framing/u)
-    expect(() => projectForeignTranscript(transcript(SMALL), 'x.jsonl', framing + 52, 'full'))
+    expect(() => projectForeignTranscript(transcript(SMALL), 'x.jsonl', framing + 52, FULL))
       .toThrow(/cannot hold even one truncated item/u)
   })
 })

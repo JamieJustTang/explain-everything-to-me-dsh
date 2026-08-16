@@ -13,15 +13,19 @@ export type ForeignTranscriptOrigin =
 
 /**
  * How much of one foreign session an import carries. Explaining the whole
- * conversation and explaining the latest exchange are different requests:
- * `full` keeps the session arc, `latest` keeps only the trailing exchange so
- * "what did it just do" questions get focused context.
+ * conversation, the latest exchange, the opening exchanges, or the most
+ * recent few are different requests; the count-carrying kinds (`first`,
+ * `last`) take an exchange count, the others stand alone.
  */
 export type ForeignTranscriptScope =
   /** Every conversation item, byte-budgeted head and tail. */
   | 'full'
-  /** Only the trailing exchange: the last user message through the session end. */
+  /** Only the trailing exchange: the last user message through the session end; same as `last` with one exchange. */
   | 'latest'
+  /** The first N exchanges from the session start; requires the exchanges count. */
+  | 'first'
+  /** The last N exchanges through the session end; requires the exchanges count. */
+  | 'last'
 
 /**
  * One ordered conversation element lifted out of a foreign session log.
@@ -68,6 +72,8 @@ export interface ForeignTranscriptSource {
   readonly label: string
   /** Import scope that selected the carried items. */
   readonly scope: ForeignTranscriptScope
+  /** Exchange count carried with scope `first`/`last`; absent otherwise. */
+  readonly exchanges?: number
   /** Item count before byte-budget retention. */
   readonly totalItems: number
   /** UTF-8 bytes dropped from the middle to fit the configured budget. */

@@ -108,11 +108,12 @@ describe('foreign-transcript registration', () => {
       expect(test.ctx.commands.list(agent)).toContainEqual({
         name: 'import-session',
         description: 'Import a Claude Code or Codex session transcript from this machine as conversation context',
-        input: { hint: 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots; --latest imports only the latest exchange' },
+        input: { hint: 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots; --latest / --first N / --last N bound the import to part of the session' },
       })
       const schema = test.ctx.tools.schemas().find(entry => entry.name === 'import_foreign_session')
       expect(schema?.parameters.properties).toMatchObject({
-        scope: { enum: ['full', 'latest'] },
+        scope: { enum: ['full', 'latest', 'first', 'last'] },
+        exchanges: { type: 'number' },
       })
       expect(test.ctx.tools.schemas().some(schema => schema.name === 'import_foreign_session')).toBe(true)
 
@@ -139,7 +140,7 @@ describe('/import-session command', () => {
       const execution = await test.ctx.commands.execute(agent, '/import-session', SIGNAL)
       expect(execution?.result).toEqual({
         kind: 'error',
-        text: 'usage: /import-session [--latest] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end',
+        text: 'usage: /import-session [--latest | --first N | --last N] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end, --first N the opening N exchanges, --last N the most recent N exchanges',
       })
     } finally {
       await test.cleanup()
@@ -207,6 +208,32 @@ describe('/import-session command', () => {
       expect(flagAlone?.result).toMatchObject({ kind: 'error' })
       if (flagAlone?.result.kind !== 'error') throw new Error('expected error')
       expect(flagAlone.result.text).toMatch(/^usage:/u)
+
+      const opening = await test.ctx.commands.execute(agent, '/import-session --first 1 claude', SIGNAL)
+      expect(opening?.result.kind).toBe('success')
+      if (opening?.result.kind !== 'success') throw new Error('expected success')
+      expect(opening.result.text).toContain('Imported the first 1 exchanges (2 transcript items)')
+      const openingInjected = agent.inject.mock.calls.at(-1)?.[0] as {
+        source: { scope: string; exchanges?: number }
+        content: { text: string }[]
+      }
+      expect(openingInjected.source).toMatchObject({ scope: 'first', exchanges: 1 })
+      expect(openingInjected.content[0]?.text).toContain('[user]\nset up the harness')
+      expect(openingInjected.content[0]?.text).not.toContain('ship it now')
+
+      const closing = await test.ctx.commands.execute(agent, '/import-session claude --last 1', SIGNAL)
+      expect(closing?.result.kind).toBe('success')
+      expect(closing?.result.kind === 'success' && closing.result.text).toContain('Imported the last 1 exchanges (2 transcript items)')
+
+      const conflicted = await test.ctx.commands.execute(agent, '/import-session --latest --first 2 claude', SIGNAL)
+      expect(conflicted?.result).toMatchObject({ kind: 'error' })
+      if (conflicted?.result.kind !== 'error') throw new Error('expected error')
+      expect(conflicted.result.text).toMatch(/choose one scope flag/u)
+
+      const missingCount = await test.ctx.commands.execute(agent, '/import-session --first claude', SIGNAL)
+      expect(missingCount?.result).toMatchObject({ kind: 'error' })
+      if (missingCount?.result.kind !== 'error') throw new Error('expected error')
+      expect(missingCount.result.text).toMatch(/needs a positive integer exchange count/u)
     } finally {
       await test.cleanup()
     }
@@ -405,6 +432,32 @@ describe('foreign-session mentions in user text', () => {
     }
   })
 
+  it('expands a ?last-N mention into a counted closing window', async () => {
+    const test = await harness()
+    try {
+      const path = await writeSession(
+        test.claudeRoot,
+        join('-work-project', 'session-2.jsonl'),
+        CLAUDE_TWO_EXCHANGES,
+      )
+      const agent = stubAgent('/work/project')
+      const userMessage = createUserMessage({
+        content: [{ type: 'text', text: `recap the finish: foreign-session:${path}?last-1` }],
+        source: { kind: 'user' },
+      })
+      const messages = enterMessages(await fire(test.ctx, agent, [userMessage]))
+      expect(messages).toHaveLength(2)
+      expect(messages[1]?.source).toMatchObject({ kind: 'foreign-transcript', path, scope: 'last', exchanges: 1 })
+      const block = messages[1]?.content[0]
+      if (block?.type !== 'text') throw new Error('expected text context block')
+      expect(block.text).toContain('Scope: last 1 exchange')
+      expect(block.text).toContain('[user]\nship it now')
+      expect(block.text).not.toContain('set up the harness')
+    } finally {
+      await test.cleanup()
+    }
+  })
+
   it('leaves steps without mentions untouched, passes rejects through, and stops on aborted signals', async () => {
     const test = await harness()
     try {
@@ -579,6 +632,54 @@ describe('import_foreign_session tool', () => {
       expect(text).toContain('Scope: latest exchange only')
       expect(text).toContain('[user]\nship it now')
       expect(text).not.toContain('set up the harness')
+    } finally {
+      await test.cleanup()
+    }
+  })
+
+  it('imports counted windows through scope plus exchanges, rejecting unpaired values', async () => {
+    const test = await harness()
+    try {
+      await writeSession(
+        test.claudeRoot,
+        join('-work-project', 'session-5.jsonl'),
+        CLAUDE_TWO_EXCHANGES,
+      )
+      const agent = stubAgent('/work/project')
+      const opening = await test.ctx.tools.execute({
+        signal: SIGNAL,
+        callId: CallId(`call-${++callCounter}`),
+        name: 'import_foreign_session',
+        arguments: { specifier: 'claude', scope: 'first', exchanges: 1 },
+        agent,
+      })
+      expect(opening.isError).not.toBe(true)
+      const openingText = opening.content.filter(block => block.type === 'text').map(block => block.text).join('')
+      expect(openingText).toContain('Scope: first 1 exchange')
+      expect(openingText).toContain('[user]\nset up the harness')
+      expect(openingText).not.toContain('ship it now')
+
+      const missing = await test.ctx.tools.execute({
+        signal: SIGNAL,
+        callId: CallId(`call-${++callCounter}`),
+        name: 'import_foreign_session',
+        arguments: { specifier: 'claude', scope: 'last' },
+        agent,
+      })
+      expect(missing.isError).toBe(true)
+      const missingText = missing.content.filter(block => block.type === 'text').map(block => block.text).join('')
+      expect(missingText).toMatch(/requires exchanges/u)
+
+      const unpaired = await test.ctx.tools.execute({
+        signal: SIGNAL,
+        callId: CallId(`call-${++callCounter}`),
+        name: 'import_foreign_session',
+        arguments: { specifier: 'claude', scope: 'full', exchanges: 2 },
+        agent,
+      })
+      expect(unpaired.isError).toBe(true)
+      const unpairedText = unpaired.content.filter(block => block.type === 'text').map(block => block.text).join('')
+      expect(unpairedText).toMatch(/takes no exchanges/u)
     } finally {
       await test.cleanup()
     }

@@ -306,13 +306,26 @@ describe('resolveForeignSession', () => {
 
 describe('splitScopeSuffix', () => {
   it('strips the latest suffix and leaves other specifiers at full scope', () => {
-    expect(splitScopeSuffix('claude?latest')).toEqual({ specifier: 'claude', scope: 'latest' })
+    expect(splitScopeSuffix('claude?latest')).toEqual({ specifier: 'claude', scope: 'latest', exchanges: undefined })
     expect(splitScopeSuffix('/tmp/sessions/rollout-1.jsonl?latest')).toEqual({
       specifier: '/tmp/sessions/rollout-1.jsonl',
       scope: 'latest',
+      exchanges: undefined,
     })
-    expect(splitScopeSuffix('claude')).toEqual({ specifier: 'claude', scope: 'full' })
-    expect(splitScopeSuffix('claude?latestx')).toEqual({ specifier: 'claude?latestx', scope: 'full' })
-    expect(splitScopeSuffix('?latest')).toEqual({ specifier: '', scope: 'latest' })
+    expect(splitScopeSuffix('claude')).toEqual({ specifier: 'claude', scope: 'full', exchanges: undefined })
+    expect(splitScopeSuffix('claude?latestx')).toEqual({ specifier: 'claude?latestx', scope: 'full', exchanges: undefined })
+    expect(splitScopeSuffix('?latest')).toEqual({ specifier: '', scope: 'latest', exchanges: undefined })
+  })
+
+  it('strips counted suffixes and leaves malformed ones as specifier text', () => {
+    expect(splitScopeSuffix('claude?first-3')).toEqual({ specifier: 'claude', scope: 'first', exchanges: 3 })
+    expect(splitScopeSuffix('claude?last-12')).toEqual({ specifier: 'claude', scope: 'last', exchanges: 12 })
+    expect(splitScopeSuffix('.ft-codex/session.jsonl?first-1')).toEqual({
+      specifier: '.ft-codex/session.jsonl',
+      scope: 'first',
+      exchanges: 1,
+    })
+    expect(splitScopeSuffix('claude?first-0')).toEqual({ specifier: 'claude?first-0', scope: 'full', exchanges: undefined })
+    expect(splitScopeSuffix('claude?first-abc')).toEqual({ specifier: 'claude?first-abc', scope: 'full', exchanges: undefined })
   })
 })

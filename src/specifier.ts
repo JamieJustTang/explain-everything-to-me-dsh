@@ -18,24 +18,36 @@ export type ForeignSpecifier =
   | { readonly kind: 'origin'; readonly origin: ForeignTranscriptOrigin }
   | { readonly kind: 'path'; readonly path: string }
 
-/** Suffix marking a latest-exchange import on a user-facing specifier. */
-export const LATEST_SCOPE_SUFFIX = '?latest'
+/** Scope suffix a mention may end with: `?latest`, `?first-N`, or `?last-N` with a positive count. */
+const SCOPE_SUFFIX_PATTERN = /\?(latest|first-([1-9][0-9]*)|last-([1-9][0-9]*))$/u
+
+/** One specifier with the import scope its suffix named. */
+export interface ScopedSpecifier {
+  readonly specifier: string
+  readonly scope: ForeignTranscriptScope
+  /** Exchange count named by a `first-`/`last-` suffix; `undefined` otherwise. */
+  readonly exchanges: number | undefined
+}
 
 /**
  * Split one user-facing specifier into its locating part and the import scope
  * it names.
- * @param input - raw specifier, possibly ending in `?latest`.
- * @returns the specifier without the suffix and the scope; an input that is
- * only the suffix yields an empty specifier that downstream parsing rejects.
+ * @param input - raw specifier, possibly ending in `?latest`, `?first-N`, or `?last-N`.
+ * @returns the specifier without the suffix plus the scope and count it named;
+ * an input that is only the suffix yields an empty specifier that downstream
+ * parsing rejects, and an unrecognized suffix stays part of the specifier.
  */
-export function splitScopeSuffix(input: string): {
-  readonly specifier: string
-  readonly scope: ForeignTranscriptScope
-} {
-  if (input.endsWith(LATEST_SCOPE_SUFFIX)) {
-    return { specifier: input.slice(0, -LATEST_SCOPE_SUFFIX.length), scope: 'latest' }
+export function splitScopeSuffix(input: string): ScopedSpecifier {
+  const match = SCOPE_SUFFIX_PATTERN.exec(input)
+  if (match === null) return { specifier: input, scope: 'full', exchanges: undefined }
+  const specifier = input.slice(0, match.index)
+  const [token, first, last] = [match[1] as string, match[2], match[3]]
+  if (token === 'latest') return { specifier, scope: 'latest', exchanges: undefined }
+  return {
+    specifier,
+    scope: first !== undefined ? 'first' : 'last',
+    exchanges: Number.parseInt(first ?? (last as string), 10),
   }
-  return { specifier: input, scope: 'full' }
 }
 
 /**

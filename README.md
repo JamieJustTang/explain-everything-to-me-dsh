@@ -32,7 +32,7 @@ explain-to-me 是这台指令台的第一块拼图：它把你本机的 Claude/C
 也可以在任意输入里写 `foreign-session:claude` 引用，或让模型自己调
 `search_foreign_sessions` → `ask_user_question` → `import_foreign_session`。
 
-推荐安装 [ste-language-improvement](https://github.com/JamieJustTang/ste-language-improvement)：
+推荐安装 [ste-language-improvement](https://github.com/JamieJustTang/ste-language-zh-improvement)：
 DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现附中文、无黑话），进一步优化交互体感。
 
 ### 2. 敲决策：「我看不懂，待决策项太多了，我们一个一个来」
@@ -41,7 +41,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 
 > 我看不懂。待决策项太多了。请你一个一个阐述和解释选项分别的意义。我们一个一个来敲定。
 
-推荐安装 [decision-walkthrough](https://github.com/JamieJustTang/decision-walkthrough)：
+推荐安装 [decision-walkthrough](https://github.com/JamieJustTang/decision-one-by-one)：
 它把这段流程固化为技能——一次一问、选项含义与代价、拍板复述、最后产出决策总账并入档
 `docs/DECISIONS.md`。该技能从一段真实会话提炼，场景描述见其仓库。
 
@@ -70,23 +70,35 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 
 ## 效果实测（语言层）
 
-原文取自一段真实 Codex 汇报（标识已匿名化），经 ste-language-improvement 规则改写：
+两组真实 Codex 会话文本（标识已匿名化），“改进后”均为 deepseek-v4-pro 实际输出
+（经 DeepSeek Harness headless 运行，2026-08-16）：
 
-| 层 | 指标 | 改进前 | 改进后 | 变化 |
-|---|---|---:|---:|---|
-| A 术语可及性 | 未解释行话密度（个/百字） | 11.5 | 1.7 | **-85%** |
-| B 句法完整性 | 列表条目成句率 | 0/13 | 13/13 | **+100 个百分点** |
-| C 信息完整性 | 事实原子保留率 | — | **100%** | 原子清单可核对 |
-| D 残留缩写 | 项目内代号未展开 | 3 | 3 | 语言层天花板→交给本仓库的会话导入层 |
+### 案例 1：交付汇报（长文）
 
-改进前：`M3 五专家 exact prompt + egress manifest`（术语堆叠、不成句）。
-改进后（deepseek-v4-pro 实际输出）：`已交付 M3 五名专家的精确提示词（exact prompt）与出站清单（egress manifest）`。
+| 改进前（Codex 原文） | 改进后（deepseek-v4-pro 实际输出） |
+|---|---|
+| 已完成 Gate C 的全部非 live 准备,且没有调用 DeepSeek。<br>交付包括:<br>• M3 五专家 exact prompt + egress manifest<br>• M6 主稿及正反校准的 exact prompt + manifest<br>• 两阶段 M3 adjudicator materialization 机制<br>• immutable prompt bundle 执行器<br>• V5 媒介传播专家进入 canary panel<br>• 轴阈值校准结果<br>• source-packet usage ledger<br>• `reasoning_content` 持久化前递归删除、redaction 路径记录及回归测试<br>验证结果:<br>• Kernel 完整测试:全绿<br>• recorded-live 集成测试:5/5<br>• provider privacy/redaction 测试:通过<br>• 新增及修改脚本 `node --check`:通过<br>• 无网络、无正式导出、无新种子注册<br>当前唯一硬门禁是具名人类签署。相关请求位于:<br>[SEED-CHARTER-SIGNOFF-REQUEST.json](docs/gates/gate-c/SEED-CHARTER-SIGNOFF-REQUEST.json) | Gate C 的全部非实况（non-live）准备工作已完成，全程没有调用 DeepSeek。<br>交付包括：<br>• 已交付 M3 五名专家的精确提示词（exact prompt）与出站清单（egress manifest）。<br>• 已交付 M6 主稿及正反校准用的精确提示词与清单（manifest）。<br>• 已建立 M3 裁决器（adjudicator）的两阶段物化（materialization）机制。<br>• 已交付不可变提示词包（immutable prompt bundle）执行器。<br>• V5 的媒介传播专家已进入金丝雀评审组（canary panel）。<br>• 已交付轴阈值校准结果。<br>• 已交付源数据包用量台账（source-packet usage ledger）。<br>• 在持久化前递归删除 `reasoning_content`，记录脱敏（redaction）路径，并补齐回归测试。<br>验证结果：<br>• Kernel 完整测试全部通过。<br>• recorded-live 集成测试结果为 5/5。<br>• 提供方（provider）的隐私与脱敏测试通过。<br>• 新增及修改脚本的 `node --check` 检查通过。<br>• 全程无网络访问、无正式导出、无新种子注册。<br>当前唯一的硬门禁是具名人类签署。相关请求位于 [SEED-CHARTER-SIGNOFF-REQUEST.json](docs/gates/gate-c/SEED-CHARTER-SIGNOFF-REQUEST.json)。 |
 
-值得注意的实测发现：同一组事实题，deepseek-v4-pro 只读文本作答，两版都是 8/8——
-模型读者自动翻越术语墙，可理解性成本是人类专属的；而 M3/V5 这类项目代号在两版中
+### 案例 2：状态简报（短文）
+
+| 改进前（Codex 原文） | 改进后（deepseek-v4-pro 实际输出） |
+|---|---|
+| 已完成分配的 R2 语料与 Lane B V5 非 live 准备工作,并向主任务汇报。<br>验证结果:<br>• S16–S18 charter、canonical digest、CFP card:全部通过正式契约断言。<br>• V5 gardener profile:通过 `assertProfile`。<br>• 媒介研究包:14/14 来源可解析,四组 rival concepts 4/4 覆盖。<br>• stale-packet checker:4/4 smoke 通过;第三次使用产生 `stale-packet` 和退出码 3。<br>• S16–S18:仅 proposal,未写入 portfolio ledger。<br>• B2-S5:仍为 `parked`。<br>• 未调用 DeepSeek 或网络,未上传任何原始 PDF。<br>• 四位候选来源明确保留为待核验,未冒充已核验来源。 | 我完成了分配的 R2 语料与 Lane B V5 的非线上（live）准备工作，并向主任务汇报。<br>验证结果：<br>• S16–S18 的章程（charter）、规范摘要（canonical digest）与 CFP 卡（CFP card）全部通过正式契约断言。<br>• V5 园丁画像（gardener profile）通过 `assertProfile`。<br>• 媒介研究包的 14/14 个来源可解析。<br>• 媒介研究包的四组竞争概念（rival concepts）覆盖 4/4。<br>• stale-packet 检查器（checker）的冒烟测试（smoke test）4/4 通过。<br>• 该检查器第三次使用时产生 `stale-packet` 与退出码 3。<br>• S16–S18 仅有提案（proposal），未写入组合账本（portfolio ledger）。<br>• B2-S5 仍为搁置（`parked`）。<br>• 未调用 DeepSeek 或网络，也未上传任何原始 PDF。<br>• 四位候选来源明确保留为待核验，未冒充已核验来源。 |
+
+### 指标
+
+| 层 | 指标 | 案例 1 前→后 | 案例 2 前→后 |
+|---|---|---|---|
+| A 术语可及性 | 未解释行话密度（个/百字） | 11.5 → **1.7**（-85%） | 10.5 → **1.9**（-82%） |
+| B 句法完整性 | 列表条目成句率 | 0/13 → **13/13** | 8/8 → 10/10 |
+| C 信息完整性 | 事实原子保留率 | **100%** | **100%** |
+| D 残留缩写 | 项目内代号未展开数 | 3 → 3 | 5 → 5 |
+
+值得注意的实测发现：8 道事实题让 deepseek-v4-pro 只读文本作答，两版都是 8/8——
+模型读者自动翻越术语墙，可理解性成本是人类专属的；而 M3/V5/S16 这类项目代号两版
 都未展开，语言层修不掉，要靠把整个会话导入（本仓库的主业）补齐上下文层。
-
-完整对照与方法见 [ste-language-improvement](https://github.com/JamieJustTang/ste-language-improvement#效果实测)。
+完整方法与复现脚本见
+[ste-language-zh-improvement](https://github.com/JamieJustTang/ste-language-zh-improvement#效果实测)。
 
 ## 三件套
 
@@ -121,7 +133,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 5. `pnpm dsh web`（或在 headless 任务文本里用 `foreign-session:` 引用）。
 
 包内 API 文档见 [PLUGIN.md](PLUGIN.md)（[中文](PLUGIN.zh.md)）。上游发包后，将支持
-`dsh plugin add JamieJustTang/explain-to-me` 一键安装。
+`dsh plugin add JamieJustTang/explain-everything-to-me-dsh` 一键安装。
 
 ## 状态与致谢
 

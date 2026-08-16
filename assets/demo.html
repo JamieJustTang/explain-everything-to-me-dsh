@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同一段工作的两种讲法 — explain-everything-to-me-dsh 效果实测</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+         background: #f6f7f9; color: #1f2328; padding: 28px 32px 20px; }
+  .wrap { max-width: 1560px; margin: 0 auto; }
+  header { margin-bottom: 18px; }
+  header h1 { font-size: 22px; font-weight: 700; }
+  header p { font-size: 13px; color: #57606a; margin-top: 6px; line-height: 1.6; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .pane { background: #fff; border: 1px solid #d8dee4; border-radius: 10px; overflow: hidden;
+          box-shadow: 0 1px 3px rgba(31,35,40,.08); }
+  .pane .label { padding: 10px 16px; font-size: 13.5px; font-weight: 700; letter-spacing: .2px; }
+  .pane.before .label { background: #fdf0ef; color: #9a3833; border-bottom: 2px solid #e0a19b; }
+  .pane.after  .label { background: #eef6ee; color: #2f6a37; border-bottom: 2px solid #9dc3a1; }
+  .md { padding: 14px 18px 18px; font-size: 13px; line-height: 1.75; }
+  .md h1, .md h2, .md h3 { margin: 14px 0 8px; line-height: 1.4; }
+  .md h1 { font-size: 16px; } .md h2 { font-size: 15px; } .md h3 { font-size: 14px; }
+  .md p { margin: 8px 0; }
+  .md ul, .md ol { margin: 8px 0 8px 22px; }
+  .md li { margin: 4px 0; }
+  .md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+             background: #eff1f3; border-radius: 4px; padding: 1px 5px; }
+  .md table { border-collapse: collapse; margin: 10px 0; font-size: 12px; width: 100%; }
+  .md th, .md td { border: 1px solid #d8dee4; padding: 6px 9px; text-align: left; vertical-align: top; }
+  .md th { background: #f6f8fa; }
+  .md strong { font-weight: 700; }
+  .md hr { border: 0; border-top: 1px dashed #c9d1d9; margin: 14px 0; text-align: center; }
+  .md hr::after { content: "……（摘录省略）"; display: block; margin-top: -10px; background: #fff;
+                  color: #8b949e; font-size: 11px; width: 90px; margin-left: auto; margin-right: auto; }
+  footer { margin-top: 18px; background: #fff; border: 1px solid #d8dee4; border-radius: 10px;
+           padding: 12px 18px; display: flex; flex-wrap: wrap; gap: 10px 26px; align-items: center;
+           font-size: 12.5px; color: #444; }
+  footer .chip b { font-size: 14px; color: #1f2328; }
+  footer .note { flex-basis: 100%; color: #57606a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>同一段工作的两种讲法</h1>
+    <p>左侧:Claude 多智能体运行产出的决策审查与调研简报(原文摘录,……为省略)。
+       右侧:用户把材料贴给 DeepSeek,只问「它做了什么、提出了哪些建议和发现」得到的回答(真实会话输出摘录)。2026-08-16。</p>
+  </header>
+  <div class="panes">
+    <div class="pane before"><div class="label">Claude 多智能体产出 · 原文</div><div class="md" id="before"></div></div>
+    <div class="pane after"><div class="label">DeepSeek 的解读 · 同一材料</div><div class="md" id="after"></div></div>
+  </div>
+  <footer>
+    <span class="chip">平均句长 <b>32 → 27</b> 字</span>
+    <span class="chip">超 40 字长句占比 <b>25% → 12%</b></span>
+    <span class="chip">分节标题 <b>1 → 3</b></span>
+    <span class="note">真正的差别是结构解耦:左侧把 15 条决策、3 份调研、审查意见纠缠在同一段流里;右侧先答「做了什么」(4 个动作),再按报告讲「发现了什么」,最后收拢成一个明确的选择。</span>
+  </footer>
+</div>
+<script type="text/markdown" id="md-before">
+`docs/DECISIONS.md` 最近被改过——看是不是你把决策写进去了（对比 git）：
+
+决策已入账（`2923900`）。现在按你的 P0 优先级派出三个并行调研 agent（Opus），覆盖所有「需要文献调研才能继续深谈」的决策点：
+
+# 决策审查意见
+
+15 条决策已入账并提交（`2923900`）。总体判断：**这套决策内部自洽、优先级排布合理，且你把「哪些还不能拍」识别得很准**——D-v4-06 评分构念和 D-v4-08 基线可跑性都显式留给了调研，这正是该调研先行的两处。逐块意见：
+
+**两处执行风险旗（不是反对，是排期上要正视）**：
+1. **D-v4-02 六周直冲**：算力和 agent 并行能压缩的只有实现与跑批；**压不动的是三件人事**——人类专家盲评的招募与执行（D-v4-06）、自建任务集的专家验证（D-v4-03）、外部基线的适配调试（D-v4-08）。
+
+……
+
+| A 评估方法学 | D-v4-06 四步的前三步 | 14 个竞争系统/基准的评估做法逐一解剖 → 以批评文献（Hidden Pitfalls、Correct Answer Wrong Mechanism 等）为锚批判 → 从 QD 多样性、科学计量新颖性、社科理论质量标准（Davis「That's Interesting!」、Whetten、Corley & Gioia）、HCI 协作测度、长程生产率五个文献带提出候选构念池 + 强人框架草案 |
+
+……
+
+**① FP-4 的漏洞被精确定位到了代码行**：`claim-ladder.mjs` 的 `resolveEvidenceFacts()` 受理形状③——裸字符串 `evidence_level` 被直接采信，这就是「自报」通道；手术面极小（只换这一个形状为 provenance 推导）。给出三个设计模式：**A 前瞻模式声明**（RR 式，结果已知前签、事后改即 tampered）、**B 单向棘轮**（L1→L2 晋升必须独立 confirmatory 重推导，挂在 CRYSTALLIZE 上）、**C GRADE 式严苛度记分**（基线由步骤定 + 机检升降级）。推荐 **A+C 组合、B 做成消融开关**。最关键的治理洞见是 Vazire 悖论：只给 confirmatory 装牙齿，引擎会理性地全部声明 exploratory——所以防套利的重点是「让探索产物结构性到不了高阶梯」，不是惩罚探索。
+
+……
+
+**① 评分框架的骨架已经被文献逼出来了（D-v4-06 第四步的雏形）**。三条铁证——novelty mirage（LLM judge 一贯高估机器产物新颖性、专家结论相反）、Agents4Science 的 AI-人相关仅 r=0.12–0.26、而人-人一致性上界本身只有 r=0.14——共同决定了唯一站得住的结构：**机器可算仪表盘（高频）→ 受约束的 LLM judge（中频，novelty 不得单独裁定）→ 人类专家锚点（低频）**三层，外加两个强制元层：判官偏倚在自家 rubric 上实测、LLM-人/人-人/LLM-LLM 三重一致性同报。
+
+</script>
+<script type="text/markdown" id="md-after">
+## 一、Claude 这一次做了什么（动作清单，已核实）
+
+这一次**没有动系统代码**，全是「调研 + 记账」：
+
+1. **把决策写进账本并提交**：`docs/DECISIONS.md` 新增 §I（D-v4-01 到 D-v4-15，共 45 行），commit `2923900`，工作树 clean。
+2. **按 P0 优先级，派了 3 个并行调研 agent**（Opus）：A 评估方法学、B 基线可跑性、C 设计输入。
+3. **三份报告存档**；最后给你一份「决策审查意见」+ 一份「跨报告综合简报」，甩给你一张「待拍板清单」。
+
+值得注意的是：他做的**不是**「又跑一遍实验」，而是**把下一步的决策风险提前用文献和实测摸了一遍**。
+
+……
+
+### 调研 B——发现了一个会推翻前提的问题
+
+你之前定的「两个外部基线跑同一批题」**不成立**：ASS 只吃「社会情境」，Agent Laboratory 吃自由文本题目，两者输入单元根本不同类。解法：自建任务集里刻意设计 8–10 题「情境可表达」任务，让两个基线在这个子集上同台。**连带后果**：自建集升格为主力评测集，变成单点故障，标注人力必须最早锁定。
+
+……
+
+### 调研 A——把评分框架的骨架逼出来了
+
+普查了 16 个系统/基准的评估做法，最硬的三条铁证：
+
+1. **novelty 幻象**：LLM judge 一贯高估机器产物的新颖性，专家结论相反 → novelty 维度绝不能由 LLM judge 单独裁定。
+2. AI-人相关只有 r=0.12–0.26；人-人一致性上界本身只有 r≈0.14 → 报「LLM 和人一致」时必须同报人-人一致性当上界，否则是自欺。
+
+由此推出的骨架 = 机器可算仪表盘（高频）→ 受约束的 LLM judge（中频）→ 人类专家盲评锚点（低频）。
+
+……
+
+**你现在面临的核心选择其实只有一个**：下一步怎么处理这 10 个待决项——在对话里逐个讨论，还是生成一张决策地图让你点选。选完，实验设计文档和工程就同时开工。
+
+</script>
+<script>
+const MINI = (src) => {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  const lines = src.split('\n'); const out = []; let list = null; let table = null;
+  const flush = () => {
+    if (list) { out.push('<' + list.t + '>' + list.items.map(i => '<li>' + i + '</li>').join('') + '</' + list.t + '>'); list = null; }
+    if (table) { out.push('<table><tr>' + table.head.map(h => '<th>' + h + '</th>').join('') + '</tr>'
+      + table.rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') + '</table>'); table = null; }
+  };
+  for (const line of lines) {
+    if (/^\s*$/.test(line)) { flush(); continue; }
+    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (h) { flush(); out.push('<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'); continue; }
+    if (/^……\s*$/.test(line.trim())) { flush(); out.push('<hr>'); continue; }
+    const t = /^\|(.+)\|$/.exec(line.trim());
+    if (t) {
+      const cells = t[1].split('|').map(c => inline(c.trim()));
+      if (cells.every(c => /^-+$/.test(c.replace(/\s|—/g, '')))) continue;
+      if (!table) table = { head: cells, rows: [] }; else table.rows.push(cells);
+      continue;
+    }
+    const ul = /^[-•]\s+(.*)$/.exec(line.trim());
+    const ol = /^(\d+)[.、]\s+(.*)$/.exec(line.trim());
+    if (ul) { if (!list || list.t !== 'ul') { flush(); list = { t: 'ul', items: [] }; } list.items.push(inline(ul[1])); continue; }
+    if (ol) { if (!list || list.t !== 'ol') { flush(); list = { t: 'ol', items: [] }; } list.items.push(inline(ol[2])); continue; }
+    flush(); out.push('<p>' + inline(line) + '</p>');
+  }
+  flush(); return out.join('\n');
+};
+const render = () => {
+  const b = document.getElementById('md-before').textContent.trim();
+  const a = document.getElementById('md-after').textContent.trim();
+  if (window.marked) {
+    document.getElementById('before').innerHTML = marked.parse(b);
+    document.getElementById('after').innerHTML = marked.parse(a);
+  } else {
+    document.getElementById('before').innerHTML = MINI(b);
+    document.getElementById('after').innerHTML = MINI(a);
+  }
+  document.querySelectorAll('.md p').forEach((p) => {
+    if (p.textContent.trim() === '……') {
+      const hr = document.createElement('hr');
+      p.replaceWith(hr);
+    }
+  });
+  document.title = 'ready';
+};
+window.addEventListener('load', render);
+</script>
+</body>
+</html>

@@ -11,12 +11,32 @@ import { CLAUDE_RECORD_TYPES } from './claude-code.ts'
 import { parseCodexTranscript } from './codex.ts'
 import { ForeignTranscriptError, type ResolvedConfig } from './config.ts'
 import { parseJsonlLine } from './jsonl.ts'
-import type { ForeignTranscript, ForeignTranscriptOrigin } from './types.ts'
+import type { ForeignTranscript, ForeignTranscriptOrigin, ForeignTranscriptScope } from './types.ts'
 
 /** One parsed user-facing specifier: an origin keyword or an explicit path. */
 export type ForeignSpecifier =
   | { readonly kind: 'origin'; readonly origin: ForeignTranscriptOrigin }
   | { readonly kind: 'path'; readonly path: string }
+
+/** Suffix marking a latest-exchange import on a user-facing specifier. */
+export const LATEST_SCOPE_SUFFIX = '?latest'
+
+/**
+ * Split one user-facing specifier into its locating part and the import scope
+ * it names.
+ * @param input - raw specifier, possibly ending in `?latest`.
+ * @returns the specifier without the suffix and the scope; an input that is
+ * only the suffix yields an empty specifier that downstream parsing rejects.
+ */
+export function splitScopeSuffix(input: string): {
+  readonly specifier: string
+  readonly scope: ForeignTranscriptScope
+} {
+  if (input.endsWith(LATEST_SCOPE_SUFFIX)) {
+    return { specifier: input.slice(0, -LATEST_SCOPE_SUFFIX.length), scope: 'latest' }
+  }
+  return { specifier: input, scope: 'full' }
+}
 
 /**
  * Parse one user-facing specifier.

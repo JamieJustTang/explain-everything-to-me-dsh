@@ -20,6 +20,13 @@ const CLAUDE_SESSION = `${[
   JSON.stringify({ type: 'assistant', sessionId: 'c1', cwd: '/work/project', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }),
 ].join('\n')}\n`
 
+const CLAUDE_TWO_EXCHANGES = `${[
+  JSON.stringify({ type: 'user', sessionId: 'c2', cwd: '/work/project', message: { role: 'user', content: 'set up the harness' } }),
+  JSON.stringify({ type: 'assistant', sessionId: 'c2', cwd: '/work/project', message: { role: 'assistant', content: [{ type: 'text', text: 'harness ready' }] } }),
+  JSON.stringify({ type: 'user', sessionId: 'c2', cwd: '/work/project', message: { role: 'user', content: 'ship it now' } }),
+  JSON.stringify({ type: 'assistant', sessionId: 'c2', cwd: '/work/project', message: { role: 'assistant', content: [{ type: 'text', text: 'shipped' }] } }),
+].join('\n')}\n`
+
 /** A stub agent whose session cwd and inject spy the surfaces read. */
 function stubAgent(cwd: string): Agent & { inject: ReturnType<typeof vi.fn> } {
   const id = SessionId('foreign-transcript-test')
@@ -101,7 +108,11 @@ describe('foreign-transcript registration', () => {
       expect(test.ctx.commands.list(agent)).toContainEqual({
         name: 'import-session',
         description: 'Import a Claude Code or Codex session transcript from this machine as conversation context',
-        input: { hint: 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots' },
+        input: { hint: 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots; --latest imports only the latest exchange' },
+      })
+      const schema = test.ctx.tools.schemas().find(entry => entry.name === 'import_foreign_session')
+      expect(schema?.parameters.properties).toMatchObject({
+        scope: { enum: ['full', 'latest'] },
       })
       expect(test.ctx.tools.schemas().some(schema => schema.name === 'import_foreign_session')).toBe(true)
 
@@ -128,7 +139,7 @@ describe('/import-session command', () => {
       const execution = await test.ctx.commands.execute(agent, '/import-session', SIGNAL)
       expect(execution?.result).toEqual({
         kind: 'error',
-        text: 'usage: /import-session <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported',
+        text: 'usage: /import-session [--latest] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end',
       })
     } finally {
       await test.cleanup()
@@ -158,11 +169,44 @@ describe('/import-session command', () => {
         origin: 'claude',
         path,
         label: 'session-1.jsonl',
+        scope: 'full',
         totalItems: 2,
         omittedBytes: 0,
       })
       expect(injected.content[0]?.text).toContain('<foreign-session origin="claude"')
       expect(injected.content[0]?.text).toContain('[user]\nship it')
+    } finally {
+      await test.cleanup()
+    }
+  })
+
+  it('imports only the latest exchange with the --latest flag, and reports usage when the flag names no session', async () => {
+    const test = await harness()
+    try {
+      await writeSession(
+        test.claudeRoot,
+        join('-work-project', 'session-latest.jsonl'),
+        CLAUDE_TWO_EXCHANGES,
+      )
+      const agent = stubAgent('/work/project')
+      const execution = await test.ctx.commands.execute(agent, '/import-session --latest claude', SIGNAL)
+      expect(execution?.result.kind).toBe('success')
+      if (execution?.result.kind !== 'success') throw new Error('expected success')
+      expect(execution.result.text).toContain('Imported the latest exchange (2 transcript items)')
+      expect(agent.inject).toHaveBeenCalledTimes(1)
+      const injected = agent.inject.mock.calls[0]![0] as {
+        source: { scope: string; totalItems: number }
+        content: { type: string; text: string }[]
+      }
+      expect(injected.source).toMatchObject({ scope: 'latest', totalItems: 2 })
+      expect(injected.content[0]?.text).toContain('Scope: latest exchange only')
+      expect(injected.content[0]?.text).toContain('[user]\nship it now')
+      expect(injected.content[0]?.text).not.toContain('set up the harness')
+
+      const flagAlone = await test.ctx.commands.execute(agent, '/import-session --latest', SIGNAL)
+      expect(flagAlone?.result).toMatchObject({ kind: 'error' })
+      if (flagAlone?.result.kind !== 'error') throw new Error('expected error')
+      expect(flagAlone.result.text).toMatch(/^usage:/u)
     } finally {
       await test.cleanup()
     }
@@ -335,6 +379,32 @@ describe('foreign-session mentions in user text', () => {
     }
   })
 
+  it('expands a ?latest mention into latest-exchange context only', async () => {
+    const test = await harness()
+    try {
+      const path = await writeSession(
+        test.claudeRoot,
+        join('-work-project', 'session-2.jsonl'),
+        CLAUDE_TWO_EXCHANGES,
+      )
+      const agent = stubAgent('/work/project')
+      const userMessage = createUserMessage({
+        content: [{ type: 'text', text: `what did it just do? foreign-session:${path}?latest` }],
+        source: { kind: 'user' },
+      })
+      const messages = enterMessages(await fire(test.ctx, agent, [userMessage]))
+      expect(messages).toHaveLength(2)
+      expect(messages[1]?.source).toMatchObject({ kind: 'foreign-transcript', path, scope: 'latest' })
+      const block = messages[1]?.content[0]
+      if (block?.type !== 'text') throw new Error('expected text context block')
+      expect(block.text).toContain('Scope: latest exchange only')
+      expect(block.text).toContain('[user]\nship it now')
+      expect(block.text).not.toContain('set up the harness')
+    } finally {
+      await test.cleanup()
+    }
+  })
+
   it('leaves steps without mentions untouched, passes rejects through, and stops on aborted signals', async () => {
     const test = await harness()
     try {
@@ -367,7 +437,7 @@ describe('foreign-session mentions in user text', () => {
       const agent = stubAgent('/work/project')
       const pluginSourced = createUserMessage({
         content: [{ type: 'text', text: 'foreign-session:claude' }],
-        source: { kind: 'foreign-transcript', form: 'recall', version: 1, origin: 'claude', path: '/x', label: 'x', totalItems: 0, omittedBytes: 0 },
+        source: { kind: 'foreign-transcript', form: 'recall', version: 1, origin: 'claude', path: '/x', label: 'x', scope: 'full', totalItems: 0, omittedBytes: 0 },
       })
       expect(enterMessages(await fire(test.ctx, agent, [pluginSourced]))).toEqual([pluginSourced])
 
@@ -471,6 +541,7 @@ describe('import_foreign_session tool', () => {
       })
       const text = result.content.filter(block => block.type === 'text').map(block => block.text).join('')
       expect(text).toContain('[user]\nship it')
+      expect(text).not.toContain('Scope: latest exchange only')
 
       const failure = await test.ctx.tools.execute({
         signal: SIGNAL,
@@ -482,6 +553,32 @@ describe('import_foreign_session tool', () => {
       expect(failure.isError).toBe(true)
       const failureText = failure.content.filter(block => block.type === 'text').map(block => block.text).join('')
       expect(failureText).toMatch(/outside the configured roots/u)
+    } finally {
+      await test.cleanup()
+    }
+  })
+
+  it('imports only the latest exchange through the scope parameter', async () => {
+    const test = await harness()
+    try {
+      await writeSession(
+        test.claudeRoot,
+        join('-work-project', 'session-4.jsonl'),
+        CLAUDE_TWO_EXCHANGES,
+      )
+      const agent = stubAgent('/work/project')
+      const result = await test.ctx.tools.execute({
+        signal: SIGNAL,
+        callId: CallId(`call-${++callCounter}`),
+        name: 'import_foreign_session',
+        arguments: { specifier: 'claude', scope: 'latest' },
+        agent,
+      })
+      expect(result.isError).not.toBe(true)
+      const text = result.content.filter(block => block.type === 'text').map(block => block.text).join('')
+      expect(text).toContain('Scope: latest exchange only')
+      expect(text).toContain('[user]\nship it now')
+      expect(text).not.toContain('set up the harness')
     } finally {
       await test.cleanup()
     }

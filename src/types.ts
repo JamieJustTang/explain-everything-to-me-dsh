@@ -12,6 +12,18 @@ export type ForeignTranscriptOrigin =
   | 'codex'
 
 /**
+ * How much of one foreign session an import carries. Explaining the whole
+ * conversation and explaining the latest exchange are different requests:
+ * `full` keeps the session arc, `latest` keeps only the trailing exchange so
+ * "what did it just do" questions get focused context.
+ */
+export type ForeignTranscriptScope =
+  /** Every conversation item, byte-budgeted head and tail. */
+  | 'full'
+  /** Only the trailing exchange: the last user message through the session end. */
+  | 'latest'
+
+/**
  * One ordered conversation element lifted out of a foreign session log.
  * Tool outputs are deliberately absent: the import keeps both sides of the
  * dialogue plus tool-call one-liners, and the byte budget bounds the whole.
@@ -54,6 +66,8 @@ export interface ForeignTranscriptSource {
   readonly path: string
   /** Display label for transcript headers (session file basename). */
   readonly label: string
+  /** Import scope that selected the carried items. */
+  readonly scope: ForeignTranscriptScope
   /** Item count before byte-budget retention. */
   readonly totalItems: number
   /** UTF-8 bytes dropped from the middle to fit the configured budget. */

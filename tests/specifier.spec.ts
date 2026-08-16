@@ -7,6 +7,7 @@ import {
   expandHome,
   parseSpecifier,
   resolveForeignSession,
+  splitScopeSuffix,
 } from '../src/specifier.ts'
 import {
   ForeignTranscriptError,
@@ -63,9 +64,9 @@ describe('parseSpecifier', () => {
 
 describe('claudeProjectSlug', () => {
   it('maps every non-alphanumeric character to one dash', () => {
-    expect(claudeProjectSlug('/Users/dev/project/.claude/worktrees/demo-64a8e5'))
-      .toBe('-Users-dev-project--claude-worktrees-demo-64a8e5')
-    expect(claudeProjectSlug('/Users/dev/桌面/项目')).toBe('-Users-dev------')
+    expect(claudeProjectSlug('/Users/jamie/Desktop/Knoweia/.claude/worktrees/sharp-lewin-64a8e5'))
+      .toBe('-Users-jamie-Desktop-Knoweia--claude-worktrees-sharp-lewin-64a8e5')
+    expect(claudeProjectSlug('/Users/jamie/桌面/项目')).toBe('-Users-jamie------')
   })
 })
 
@@ -300,5 +301,18 @@ describe('resolveForeignSession', () => {
     } finally {
       await box.cleanup()
     }
+  })
+})
+
+describe('splitScopeSuffix', () => {
+  it('strips the latest suffix and leaves other specifiers at full scope', () => {
+    expect(splitScopeSuffix('claude?latest')).toEqual({ specifier: 'claude', scope: 'latest' })
+    expect(splitScopeSuffix('/tmp/sessions/rollout-1.jsonl?latest')).toEqual({
+      specifier: '/tmp/sessions/rollout-1.jsonl',
+      scope: 'latest',
+    })
+    expect(splitScopeSuffix('claude')).toEqual({ specifier: 'claude', scope: 'full' })
+    expect(splitScopeSuffix('claude?latestx')).toEqual({ specifier: 'claude?latestx', scope: 'full' })
+    expect(splitScopeSuffix('?latest')).toEqual({ specifier: '', scope: 'latest' })
   })
 })

@@ -26,11 +26,14 @@ explain-everything-to-me-dsh 是这台指令台的第一块拼图：它把你本
 
 ```text
 /import-session claude parser        # 按题目检索，多个匹配会弹多选题让你挑
-/import-session codex                 # 直接取当前项目最近一次 Codex 会话
+/import-session codex                # 直接取当前项目最近一次 Codex 会话
+/import-session codex --latest       # 只要最近一轮——"它刚才做了什么"
 ```
 
-也可以在任意输入里写 `foreign-session:claude` 引用，或让模型自己调
-`search_foreign_sessions` → `ask_user_question` → `import_foreign_session`。
+也可以在任意输入里写 `foreign-session:claude` 引用（`foreign-session:claude?latest`
+只要最近一轮），或让模型自己调
+`search_foreign_sessions` → `ask_user_question` → `import_foreign_session`
+（工具的 `scope` 参数同样区分 `full` / `latest`）。
 
 推荐安装 [ste-language-zh-improvement](https://github.com/JamieJustTang/ste-language-zh-improvement)：
 DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现附中文、无黑话），进一步优化交互体感。
@@ -62,6 +65,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 |---|---|
 | 双来源读取 | `~/.claude/projects`（Claude Code / Claude Desktop agent 会话）与 `~/.codex/sessions`（Codex CLI / Codex Desktop） |
 | 三个入口 | `/import-session` 斜杠命令；`foreign-session:` 文本引用（覆盖 headless/ACP/SDK 全部输入面）；`import_foreign_session` 模型工具 |
+| 整段 vs 最近一轮 | 三个入口都区分导入范围：命令 `--latest`、引用 `?latest` 后缀、工具 `scope` 参数；`latest` 只取「最后一条用户消息 → 会话末尾」这一轮，专答"它刚才做了什么" |
 | 题目检索 | `/import-session claude <关键词>` / 工具 `query` 参数：按会话题目（summary 行或首条用户消息）跨项目检索，summary 优先、新者优先 |
 | 交互消歧 | 多个匹配时经 user-questions 弹**多选题**，你挑哪条（哪几条），精确导入所选；无 UI 时回退为导入最佳并列出候选 |
 | 只搜不导 | `search_foreign_sessions` 工具返回候选列表不导入，配合 `ask_user_question` 让你先挑再导 |
@@ -122,6 +126,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 ## 状态与致谢
 
 - 0.1.0：导入、题目检索、多选消歧、检索工具、决策文档用法。
+- 0.2.0：导入范围区分（整段会话 vs 最近一轮）：命令 `--latest`、引用 `?latest`、工具 `scope` 参数；句中引用尾部句读自动修剪。
 - 路线图：独立 npm 安装；会话进展的定时摘要；决策文档模板化。
 - 插件在 deepseek-harness 仓库内通过全部相关门禁（60 项单测、每文件 100% 覆盖率、无 key 快照回归）。
 - 灵感与基座来自 DeepSeek Harness 的插件化架构；语言规则站在 ASD-STE100 与其中文社区补充的肩膀上。

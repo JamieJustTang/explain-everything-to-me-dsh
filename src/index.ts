@@ -12,6 +12,9 @@
  * every surface, including headless and ACP prompts), and two model tools:
  * `search_foreign_sessions` (topic search returning the candidate list) and
  * `import_foreign_session` (imports one transcript, optionally by query).
+ * Every surface distinguishes import scope: the whole session (default) or
+ * only the latest exchange — the command's `--latest` flag, the mention's
+ * `?latest` suffix, and the tool's `scope` parameter.
  *
  * @module @deepseek-ai/dsh-foreign-transcript
  */
@@ -34,8 +37,8 @@ import { projectForeignTranscript } from './projection.ts'
 import type { ProjectedTranscript } from './projection.ts'
 import { searchForeignSessions } from './search.ts'
 import type { ForeignSessionCandidate } from './search.ts'
-import { parseSpecifier, resolveForeignSession } from './specifier.ts'
-import type { ForeignTranscriptOrigin, ForeignTranscriptSource } from './types.ts'
+import { parseSpecifier, resolveForeignSession, splitScopeSuffix } from './specifier.ts'
+import type { ForeignTranscriptOrigin, ForeignTranscriptScope, ForeignTranscriptSource } from './types.ts'
 // Projects the MessageSourceMap merge onto the package root so aggregate
 // programs consuming the declarations receive the 'foreign-transcript' source.
 export type * from './types.ts'
@@ -57,10 +60,12 @@ export {
 export { FOREIGN_SESSION_SCHEME, extractForeignMentions } from './mention.ts'
 export { projectForeignTranscript } from './projection.ts'
 export {
+  LATEST_SCOPE_SUFFIX,
   claudeProjectSlug,
   expandHome,
   parseSpecifier,
   resolveForeignSession,
+  splitScopeSuffix,
 } from './specifier.ts'
 export { parseClaudeCodeTranscript, CLAUDE_RECORD_TYPES } from './claude-code.ts'
 export { parseCodexTranscript } from './codex.ts'
@@ -107,18 +112,21 @@ export const Config: z<Config> = z.object({
 
 const COMMAND_NAME = 'import-session'
 const COMMAND_DESCRIPTION = 'Import a Claude Code or Codex session transcript from this machine as conversation context'
-const COMMAND_HINT = 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots'
-const COMMAND_USAGE = 'usage: /import-session <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported'
+const COMMAND_HINT = 'claude [topic keywords] | codex [topic keywords] | path to a session .jsonl under the configured roots; --latest imports only the latest exchange'
+const COMMAND_LATEST_FLAG = '--latest'
+const COMMAND_USAGE = 'usage: /import-session [--latest] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end'
 
 const TOOL_SPECIFIER_DESCRIPTION = 'Specifier to import: "claude" or "codex" for the newest session of the current project, or a path to a session .jsonl file under the configured roots.'
 const TOOL_QUERY_DESCRIPTION = 'Optional topic keywords. With "claude"/"codex", the best-matching session topic across all of that origin\'s sessions is imported instead of the newest one; the result lists the other matches.'
-const TOOL_DESCRIPTION = 'Import one Claude Code or Codex session transcript from this machine as bounded text. Use it when the user points at work done in another agent (a Claude or Codex session) and wants to continue from it.'
+const TOOL_SCOPE_DESCRIPTION = 'Import scope. "full" (default) imports the whole session transcript. "latest" imports only the latest exchange — the last user message through the end of the session — which fits questions like "what did it just do".'
+const TOOL_DESCRIPTION = 'Import one Claude Code or Codex session transcript from this machine as bounded text. Use it when the user points at work done in another agent (a Claude or Codex session) and wants to continue from it. Pass scope="latest" when the user asks what the other agent just did or wants only the most recent step; leave the default when they want the whole session\'s arc.'
 const SEARCH_TOOL_DESCRIPTION = 'Search Claude Code or Codex session logs by topic keywords and return the matching sessions WITHOUT importing them. When the user describes prior work in another agent only vaguely, search first, present the matches (through ask_user_question when the user should choose), then call import_foreign_session with the chosen path(s).'
 
 /** One prepared import shared by all three surfaces. */
 interface PreparedImport {
   readonly origin: ForeignTranscriptOrigin
   readonly path: string
+  readonly scope: ForeignTranscriptScope
   readonly projected: ProjectedTranscript
 }
 
@@ -128,6 +136,7 @@ interface PreparedImport {
  * @param cwd - working directory for latest-session lookup and relative paths.
  * @param config - validated configuration.
  * @param signal - cancellation signal of the calling surface.
+ * @param scope - how much of the session to carry.
  * @returns the import plus its durable source metadata inputs.
  */
 async function prepareImport(
@@ -135,11 +144,12 @@ async function prepareImport(
   cwd: string,
   config: ResolvedConfig,
   signal: AbortSignal | undefined,
+  scope: ForeignTranscriptScope,
 ): Promise<PreparedImport> {
   const { origin, path, transcript } = await resolveForeignSession({ specifier, cwd, config, signal })
   const label = basename(path)
-  const projected = projectForeignTranscript(transcript, label, config.maxTranscriptBytes)
-  return { origin, path, projected }
+  const projected = projectForeignTranscript(transcript, label, config.maxTranscriptBytes, scope)
+  return { origin, path, scope, projected }
 }
 
 /** One best-match import plus the other topic candidates found beside it. */
@@ -155,6 +165,7 @@ interface SearchedImport {
  * @param cwd - working directory for relative paths.
  * @param config - validated configuration.
  * @param signal - cancellation signal of the calling surface.
+ * @param scope - how much of the matched session to carry.
  * @returns the best match prepared for import plus every returned candidate.
  * @throws {@link ForeignTranscriptError} with `FOREIGN_TRANSCRIPT_NOT_FOUND` when nothing matches.
  */
@@ -164,6 +175,7 @@ async function searchAndPrepare(
   cwd: string,
   config: ResolvedConfig,
   signal: AbortSignal | undefined,
+  scope: ForeignTranscriptScope,
 ): Promise<SearchedImport> {
   const candidates = await searchForeignSessions({ origin, query, config, signal })
   const best = candidates[0]
@@ -173,7 +185,7 @@ async function searchAndPrepare(
       'FOREIGN_TRANSCRIPT_NOT_FOUND',
     )
   }
-  return { prepared: await prepareImport(best.path, cwd, config, signal), candidates }
+  return { prepared: await prepareImport(best.path, cwd, config, signal, scope), candidates }
 }
 
 /**
@@ -268,6 +280,7 @@ function foreignSource(prepared: PreparedImport): ForeignTranscriptSource {
     origin: prepared.origin,
     path: prepared.path,
     label: basename(prepared.path),
+    scope: prepared.scope,
     totalItems: prepared.projected.totalItems,
     omittedBytes: prepared.projected.omittedBytes,
   }
@@ -282,7 +295,10 @@ function renderSuccess(prepared: PreparedImport): string {
   const omission = prepared.projected.omittedBytes > 0
     ? ` (omitted ${prepared.projected.omittedBytes} bytes from the middle)`
     : ''
-  return `Imported ${prepared.projected.totalItems} transcript items${omission} from ${prepared.origin} session ${prepared.path}.`
+  const carried = prepared.scope === 'latest'
+    ? `the latest exchange (${prepared.projected.totalItems} transcript items)`
+    : `${prepared.projected.totalItems} transcript items`
+  return `Imported ${carried}${omission} from ${prepared.origin} session ${prepared.path}.`
 }
 
 /**
@@ -330,7 +346,9 @@ export function apply(ctx: Context, config: Config): void {
     description: COMMAND_DESCRIPTION,
     input: { hint: COMMAND_HINT },
     handler: async ({ agent, rawInput, signal }): Promise<CommandResult> => {
-      const [firstWord, ...rest] = rawInput.trim().split(/\s+/u)
+      const tokens = rawInput.trim().split(/\s+/u).filter(token => token !== '')
+      const scope: ForeignTranscriptScope = tokens.includes(COMMAND_LATEST_FLAG) ? 'latest' : 'full'
+      const [firstWord, ...rest] = tokens.filter(token => token !== COMMAND_LATEST_FLAG)
       const specifier = firstWord ?? ''
       const query = rest.join(' ')
       if (specifier === '') return { kind: 'error', text: COMMAND_USAGE }
@@ -353,10 +371,10 @@ export function apply(ctx: Context, config: Config): void {
             ? [candidates[0] as ForeignSessionCandidate]
             : await askWhichSessions(ctx, parsed.origin, query, candidates, signal) ?? [candidates[0] as ForeignSessionCandidate]
           preparedImports = await Promise.all(chosen.map(
-            candidate => prepareImport(candidate.path, agent.session.header.cwd ?? process.cwd(), resolved, signal),
+            candidate => prepareImport(candidate.path, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope),
           ))
         } else {
-          preparedImports = [await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal)]
+          preparedImports = [await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope)]
         }
       } catch (error: unknown) {
         if (error instanceof ForeignTranscriptError) return { kind: 'error', text: error.message }
@@ -396,8 +414,9 @@ export function apply(ctx: Context, config: Config): void {
       )
     }
     const contexts: UserMessage[] = []
-    for (const specifier of specifiers) {
-      const prepared = await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal)
+    for (const mention of specifiers) {
+      const { specifier, scope } = splitScopeSuffix(mention)
+      const prepared = await prepareImport(specifier, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope)
       contexts.push(createUserMessage({
         content: [{ type: 'text', text: prepared.projected.text }],
         source: foreignSource(prepared),
@@ -412,6 +431,7 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       specifier: { type: 'string', required: true, description: TOOL_SPECIFIER_DESCRIPTION },
       query: { type: 'string', description: TOOL_QUERY_DESCRIPTION },
+      scope: { type: 'string', enum: ['full', 'latest'], description: TOOL_SCOPE_DESCRIPTION },
     },
     output: {
       schema: {
@@ -420,6 +440,7 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           origin: { type: 'string', required: true, enum: ['claude', 'codex'] },
           path: { type: 'string', required: true },
+          scope: { type: 'string', required: true, enum: ['full', 'latest'] },
           text: { type: 'string', required: true },
           totalItems: { type: 'integer', required: true },
           omittedBytes: { type: 'integer', required: true },
@@ -449,17 +470,19 @@ export function apply(ctx: Context, config: Config): void {
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const cwd = exec.agent?.session.header.cwd ?? process.cwd()
+      const scope = args.scope ?? 'full'
       const parsed = parseSpecifier(args.specifier)
       const query = args.query?.trim() ?? ''
       if (query !== '') {
         if (parsed.kind === 'path') {
           throw new Error('import_foreign_session: query works with the claude/codex keywords, not with an explicit path')
         }
-        const searched = await searchAndPrepare(parsed.origin, query, cwd, resolved, exec.signal)
+        const searched = await searchAndPrepare(parsed.origin, query, cwd, resolved, exec.signal, scope)
         const best = searched.candidates[0] as ForeignSessionCandidate
         return {
           origin: searched.prepared.origin,
           path: searched.prepared.path,
+          scope: searched.prepared.scope,
           text: searched.prepared.projected.text,
           totalItems: searched.prepared.projected.totalItems,
           omittedBytes: searched.prepared.projected.omittedBytes,
@@ -467,16 +490,22 @@ export function apply(ctx: Context, config: Config): void {
           alternatives: searched.candidates.slice(1).map(candidate => ({ path: candidate.path, topic: candidate.topic })),
         }
       }
-      const prepared = await prepareImport(args.specifier, cwd, resolved, exec.signal)
+      const prepared = await prepareImport(args.specifier, cwd, resolved, exec.signal, scope)
       return {
         origin: prepared.origin,
         path: prepared.path,
+        scope: prepared.scope,
         text: prepared.projected.text,
         totalItems: prepared.projected.totalItems,
         omittedBytes: prepared.projected.omittedBytes,
       }
     },
-    presentCall: args => ({ card: 'generic', title: 'Import foreign session', kind: 'other', rawInput: args.specifier }),
+    presentCall: args => ({
+      card: 'generic',
+      title: 'Import foreign session',
+      kind: 'other',
+      rawInput: args.scope === 'latest' ? `${args.specifier} (latest exchange)` : args.specifier,
+    }),
   }))
 
   ctx.tools.register(defineTool({

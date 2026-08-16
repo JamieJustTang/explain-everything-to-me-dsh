@@ -1,7 +1,7 @@
 {
   "name": "explain-everything-to-me-dsh",
   "description": "explain-to-me: import Claude Code / Codex session transcripts into DeepSeek Harness as plain-language, bounded recall context",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JamieJustTang/explain-everything-to-me-dsh.git",

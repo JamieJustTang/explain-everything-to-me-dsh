@@ -1,7 +1,7 @@
 /**
- * Topic search over foreign session logs: extract each session's topic from
- * its file head and rank keyword matches so an import can be selected by what
- * the session was about instead of by path.
+ * Keyword search over foreign session logs: match each session's topic first
+ * and fall back to matching the head's full text, so an import can be selected
+ * by what the session was about — or what it contains — instead of by path.
  * @module @deepseek-ai/dsh-foreign-transcript/search
  */
 
@@ -12,7 +12,7 @@ import { parseCodexTranscript } from './codex.ts'
 import { ForeignTranscriptError } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { expandHome } from './specifier.ts'
-import type { ForeignTranscriptOrigin } from './types.ts'
+import type { ForeignTranscript, ForeignTranscriptOrigin } from './types.ts'
 
 /** One topic-matching foreign session. */
 export interface ForeignSessionCandidate {
@@ -20,27 +20,32 @@ export interface ForeignSessionCandidate {
   readonly path: string
   /** Format family the file was recognized as. */
   readonly origin: ForeignTranscriptOrigin
-  /** Session topic: its first summary row, or its first human user message. */
+  /** Session topic: its first summary row, or its first human user message; a label when only content matched. */
   readonly topic: string
-  /** Which topic source matched. */
-  readonly topicSource: 'summary' | 'first-user-message'
+  /** Which source the match came from. */
+  readonly topicSource: 'summary' | 'first-user-message' | 'content'
   /** First record timestamp, when the head carried one. */
   readonly startedAt?: string
   /** Working directory the foreign session ran in, when recorded. */
   readonly cwd?: string
 }
 
+/** Topic label shown for a session whose head carries no extractable topic. */
+const CONTENT_MATCH_LABEL = '(matched in content only)'
+
 /**
- * Search one origin's session logs by topic keyword.
+ * Search one origin's session logs by keyword.
  *
  * Every session file under the origin's root is a candidate (newest first,
  * bounded by `latestScanLimit`). A file's topic is the first summary row in
- * its head, or its first human user message when no summary exists; files
- * whose head parses as neither format, or that carry no topic, are skipped.
- * A query matches when every whitespace-separated term appears
- * (case-insensitively) in the topic; an empty query matches every session.
- * Summary matches outrank first-user-message matches, then newer files
- * outrank older ones.
+ * its head, or its first human user message when no summary exists. A query
+ * matches when every whitespace-separated term appears (case-insensitively)
+ * in the topic; an empty query matches every session. When no session's topic
+ * matches, the same terms are matched against each head's full text instead,
+ * so a session whose relevant material sits deep in the conversation is still
+ * found; those matches carry `topicSource: 'content'` and rank below every
+ * topic match. Summary matches outrank first-user-message matches, then newer
+ * files outrank older ones.
  *
  * @param options - origin, query, validated configuration, and optional cancellation.
  * @returns the top `searchResults` candidates, best first.
@@ -54,28 +59,61 @@ export async function searchForeignSessions(options: {
   const { origin, query, config, signal } = options
   const terms = query.trim().toLowerCase().split(/\s+/u).filter(term => term !== '')
   const files = await listSessionFiles(origin, config)
-  const matches: (ForeignSessionCandidate & { readonly score: number; readonly mtimeMs: number })[] = []
+  const topicMatches: ScoredCandidate[] = []
+  const contentMatches: ScoredCandidate[] = []
   for (const { path, mtimeMs } of files) {
     if (signal?.aborted) throw new Error('foreign-transcript search was cancelled')
-    const topic = await readTopic(origin, path, config.searchHeadBytes)
-    if (topic === undefined) continue
-    if (terms.length > 0 && !terms.every(term => topic.text.toLowerCase().includes(term))) continue
-    matches.push({
-      path,
-      origin,
-      topic: topic.text,
-      topicSource: topic.source,
-      ...topic.startedAt === undefined ? {} : { startedAt: topic.startedAt },
-      ...topic.cwd === undefined ? {} : { cwd: topic.cwd },
-      score: topic.source === 'summary' ? 2 : 1,
-      mtimeMs,
-    })
+    let head: string
+    try {
+      head = await readHead(path, config.searchHeadBytes)
+    } catch {
+      continue
+    }
+    const transcript = parseHead(origin, head)
+    // A head of the other format is never a candidate for either pass.
+    if (transcript === undefined) continue
+    const topic = topicFrom(transcript)
+    if (topic !== undefined) {
+      const topicLower = topic.text.toLowerCase()
+      if (terms.length === 0 || terms.every(term => topicLower.includes(term))) {
+        topicMatches.push({
+          path,
+          origin,
+          topic: topic.text,
+          topicSource: topic.source,
+          ...topic.startedAt === undefined ? {} : { startedAt: topic.startedAt },
+          ...topic.cwd === undefined ? {} : { cwd: topic.cwd },
+          score: topic.source === 'summary' ? 2 : 1,
+          mtimeMs,
+        })
+        continue
+      }
+    }
+    if (terms.length > 0) {
+      const headLower = head.toLowerCase()
+      if (terms.every(term => headLower.includes(term))) {
+        contentMatches.push({
+          path,
+          origin,
+          topic: topic?.text ?? CONTENT_MATCH_LABEL,
+          topicSource: 'content',
+          ...topic?.startedAt === undefined ? {} : { startedAt: topic.startedAt },
+          ...topic?.cwd === undefined ? {} : { cwd: topic.cwd },
+          score: 0,
+          mtimeMs,
+        })
+      }
+    }
   }
+  const matches = topicMatches.length > 0 ? topicMatches : contentMatches
   return matches
     .sort((left, right) => right.score - left.score || right.mtimeMs - left.mtimeMs)
     .slice(0, config.searchResults)
     .map(({ score: _score, mtimeMs: _mtimeMs, ...candidate }) => candidate)
 }
+
+/** One ranked candidate before score and mtime are stripped for return. */
+type ScoredCandidate = ForeignSessionCandidate & { readonly score: number; readonly mtimeMs: number }
 
 /**
  * List one origin's session files newest-first, bounded by the scan limit.
@@ -130,33 +168,29 @@ interface SessionTopic {
 }
 
 /**
- * Read one session file's head and extract its topic.
+ * Parse one already-read head as the origin's format.
  * @param origin - expected format family of the file.
- * @param path - session file to read.
- * @param headBytes - byte cap on the head read.
- * @returns the topic, or `undefined` when the head parses as neither format or holds no topic.
+ * @param head - decoded head text of the session file.
+ * @returns the parsed transcript, or `undefined` when the head is the other
+ * format or holds no parsable record.
  */
-async function readTopic(
-  origin: ForeignTranscriptOrigin,
-  path: string,
-  headBytes: number,
-): Promise<SessionTopic | undefined> {
-  let head: string
+function parseHead(origin: ForeignTranscriptOrigin, head: string): ForeignTranscript | undefined {
   try {
-    head = await readHead(path, headBytes)
-  } catch {
-    return undefined
-  }
-  let transcript
-  try {
-    transcript = origin === 'claude'
+    return origin === 'claude'
       ? parseClaudeCodeTranscript(head, Number.MAX_SAFE_INTEGER)
       : parseCodexTranscript(head, Number.MAX_SAFE_INTEGER)
   } catch (error: unknown) {
-    // The other format's files and unparsable heads are not candidates.
     if (error instanceof ForeignTranscriptError) return undefined
     throw error
   }
+}
+
+/**
+ * Extract one parsed transcript's topic.
+ * @param transcript - parsed head transcript.
+ * @returns the topic, or `undefined` when it holds no summary and no user item.
+ */
+function topicFrom(transcript: ForeignTranscript): SessionTopic | undefined {
   const summary = transcript.items.find(item => item.kind === 'summary')
   if (summary !== undefined) {
     return {

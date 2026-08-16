@@ -32,6 +32,13 @@ explain-everything-to-me-dsh 是这台指令台的第一块拼图：它把你本
 /import-session codex --last 5       # 只要最近五轮——"带我过一遍最近的进展"
 ```
 
+首行之后的所有文字不会被当成检索词——它们会作为你的指令直接提交给 DeepSeek，一步完成"引用 + 提问"：
+
+```text
+/import-session codex CHI
+向我解释GPT提出的CHI工程和实验设计文档。
+```
+
 也可以在任意输入里写 `foreign-session:claude` 引用（后缀 `?latest`、`?first-N`、
 `?last-N` 选范围），或让模型自己调
 `search_foreign_sessions` → `ask_user_question` → `import_foreign_session`
@@ -131,6 +138,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 - 0.2.0：导入范围区分（整段会话 vs 最近一轮）：命令 `--latest`、引用 `?latest`、工具 `scope` 参数；句中引用尾部句读自动修剪。
 - 0.3.0：范围补全计数窗口：`--first N` / `--last N`、`?first-N` / `?last-N`、工具 `exchanges` 参数；正序前 N 轮与逆序最近 N 轮都可取。
 - 0.3.1：修复 Codex 题目检索全灭——新版 Codex 引导区达 19–47 KB、首条用户消息可埋至 136 KB，原 32 KB 头部读全部落空；`searchHeadBytes` 默认提至 256 KB，并跳过 `<recommended_plugins>`、AGENTS.md 指令倾倒与 agent-history 重放包裹等机器注入内容。
+- 0.3.2：检索加内容级回退（题目全不中时改匹配会话开头内容，`topicSource: 'content'`）；命令首行之后的文字作为用户指令经 `agent.followup()` 直接提交——「引用 + 提问」一步完成。
 - 路线图：独立 npm 安装；会话进展的定时摘要；决策文档模板化。
 - 插件在 deepseek-harness 仓库内通过全部相关门禁（60 项单测、每文件 100% 覆盖率、无 key 快照回归）。
 - 灵感与基座来自 DeepSeek Harness 的插件化架构；语言规则站在 ASD-STE100 与其中文社区补充的肩膀上。

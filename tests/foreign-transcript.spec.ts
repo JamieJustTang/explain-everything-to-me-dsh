@@ -40,6 +40,7 @@ function stubAgent(cwd: string): Agent & { inject: ReturnType<typeof vi.fn> } {
     id,
     session,
     inject: vi.fn(),
+    followup: vi.fn(),
   } as unknown as Agent & { inject: ReturnType<typeof vi.fn> }
 }
 
@@ -140,7 +141,7 @@ describe('/import-session command', () => {
       const execution = await test.ctx.commands.execute(agent, '/import-session', SIGNAL)
       expect(execution?.result).toEqual({
         kind: 'error',
-        text: 'usage: /import-session [--latest | --first N | --last N] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end, --first N the opening N exchanges, --last N the most recent N exchanges',
+        text: 'usage: /import-session [--latest | --first N | --last N] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end, --first N the opening N exchanges, --last N the most recent N exchanges; anything typed after the first line is submitted to the model as your instruction once the import lands',
       })
     } finally {
       await test.cleanup()
@@ -234,6 +235,38 @@ describe('/import-session command', () => {
       expect(missingCount?.result).toMatchObject({ kind: 'error' })
       if (missingCount?.result.kind !== 'error') throw new Error('expected error')
       expect(missingCount.result.text).toMatch(/needs a positive integer exchange count/u)
+    } finally {
+      await test.cleanup()
+    }
+  })
+
+  it('submits the lines after the first as the instruction for the next turn', async () => {
+    const test = await harness()
+    try {
+      await writeSession(
+        test.claudeRoot,
+        join('-work-project', 'session-instruct.jsonl'),
+        CLAUDE_SESSION,
+      )
+      const agent = stubAgent('/work/project')
+      const execution = await test.ctx.commands.execute(
+        agent,
+        '/import-session claude ship\n\n向我解释GPT提出的CHI工程和实验设计文档。',
+        SIGNAL,
+      )
+      expect(execution?.result.kind).toBe('success')
+      if (execution?.result.kind !== 'success') throw new Error('expected success')
+      expect(execution.result.text).toContain('rides the next turn')
+      expect(agent.inject).toHaveBeenCalledTimes(1)
+      const followupSpy = vi.spyOn(agent, 'followup')
+      expect(followupSpy).toHaveBeenCalledTimes(1)
+      const followup = followupSpy.mock.calls[0]![0] as { source: unknown; content: { type: string; text: string }[] }
+      expect(followup.source).toEqual({ kind: 'user' })
+      expect(followup.content[0]?.text).toBe('向我解释GPT提出的CHI工程和实验设计文档。')
+
+      const single = await test.ctx.commands.execute(agent, '/import-session claude', SIGNAL)
+      expect(single?.result.kind).toBe('success')
+      expect(followupSpy).toHaveBeenCalledTimes(1)
     } finally {
       await test.cleanup()
     }

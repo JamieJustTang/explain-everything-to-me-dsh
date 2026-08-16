@@ -14,7 +14,7 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 
 | 入口 | 触发方式 | 投递 |
 |---|---|---|
-| `/import-session [--latest \| --first N \| --last N] <specifier> [题目关键词]` | 在支持命令的输入框键入;多个题目匹配时经 user-questions 询问导入哪些(可多选) | `agent.inject()` 挂起一条带来源的上下文,随下一条提示词一起进入模型 |
+| `/import-session [--latest \| --first N \| --last N] <specifier> [题目关键词]` + 可选的指令行 | 在支持命令的输入框键入;多个题目匹配时经 user-questions 询问导入哪些(可多选);首行之后的全部文字在导入落地后作为用户指令提交给模型 | `agent.inject()` 挂起一条带来源的上下文;有指令时经 `agent.followup()` 排为下一轮的提示词 |
 | `foreign-session:<specifier>[?latest \| ?first-N \| ?last-N]`(裸写或 `@[label](…)`) | 任意用户文本,覆盖包括 headless 与 ACP 在内的所有输入面 | `agent/pre-step` 把上下文附加到被认领的消息批之后 |
 | `import_foreign_session` 工具(参数 `specifier`,可选 `query`,可选 `scope` + `exchanges`) | 模型主动调用 | 投影后的转录即工具结果 |
 | `search_foreign_sessions` 工具(参数 `origin`、`query`) | 模型主动调用 | 排序后的候选列表,不导入 |
@@ -27,7 +27,7 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 
 ## 题目检索
 
-在 `claude`/`codex` 关键字后跟题目关键词(`/import-session claude parser fix`,或工具的 `query` 参数),即可按"这个会话是关于什么"而不是按路径选择会话。一个会话的题目是文件头部第一条 summary 行(Claude 的 `summary` 行、Codex 的 `compacted` 行),没有 summary 时是首条人类用户消息;每个候选文件的头部最多读取 `searchHeadBytes` 字节(取值需越过 Codex 开头的指令块,首条用户消息可埋在 130 KB 之外)。查询匹配要求每个空白分隔的词都出现在题目中(不区分大小写);summary 匹配优先于首条用户消息匹配,再按新旧排序。检索覆盖该来源根下的所有项目目录、按新到旧的 `latestScanLimit` 个文件。`/import-session` 命令命中多个匹配时会询问导入哪些——经 `userQuestions` 服务抛出多选题,用户用自然语言确认一条或几条,命令精确导入所选;没有 UI 供应方(headless 运行)或问题被关闭时,回退为导入最佳匹配并列出其余 `searchResults` 个候选。模型侧 `search_foreign_sessions` 只返回排序列表不导入:模型把它呈现给用户(通常配合 `ask_user_question`),再用选中的路径(一条或多条)调用 `import_foreign_session`。无匹配时响亮失败;题目关键词必须搭配来源关键字——显式路径加关键词会被拒绝。
+在 `claude`/`codex` 关键字后跟题目关键词(`/import-session claude parser fix`,或工具的 `query` 参数),即可按"这个会话是关于什么"而不是按路径选择会话。一个会话的题目是文件头部第一条 summary 行(Claude 的 `summary` 行、Codex 的 `compacted` 行),没有 summary 时是首条人类用户消息;每个候选文件的头部最多读取 `searchHeadBytes` 字节(取值需越过 Codex 开头的指令块,首条用户消息可埋在 130 KB 之外)。查询匹配要求每个空白分隔的词都出现在题目中(不区分大小写);summary 匹配优先于首条用户消息匹配,再按新旧排序。没有任何题目命中时,同样的词条改对每个候选的开头内容(同一次头部读取)匹配,因此相关材料埋在会话深处的会话也能被找到;这类命中标记为 `content` 来源,排名低于一切题目命中。检索覆盖该来源根下的所有项目目录、按新到旧的 `latestScanLimit` 个文件。`/import-session` 命令命中多个匹配时会询问导入哪些——经 `userQuestions` 服务抛出多选题,用户用自然语言确认一条或几条,命令精确导入所选;没有 UI 供应方(headless 运行)或问题被关闭时,回退为导入最佳匹配并列出其余 `searchResults` 个候选。模型侧 `search_foreign_sessions` 只返回排序列表不导入:模型把它呈现给用户(通常配合 `ask_user_question`),再用选中的路径(一条或多条)调用 `import_foreign_session`。无匹配时响亮失败;题目关键词必须搭配来源关键字——显式路径加关键词会被拒绝。
 
 ## 投影与保留
 

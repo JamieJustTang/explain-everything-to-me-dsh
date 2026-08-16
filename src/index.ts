@@ -115,7 +115,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** Guidance appended to every no-topic-match failure. */
-const NO_TOPIC_MATCH_HINT = ' — every whitespace-separated term must appear in the session\'s topic (its summary or first user message); try fewer, more distinctive keywords'
+const NO_TOPIC_MATCH_HINT = ' — every whitespace-separated term must appear in the session\'s topic or its opening content; try fewer, more distinctive keywords'
 
 const COMMAND_NAME = 'import-session'
 const COMMAND_DESCRIPTION = 'Import a Claude Code or Codex session transcript from this machine as conversation context'
@@ -123,14 +123,14 @@ const COMMAND_HINT = 'claude [topic keywords] | codex [topic keywords] | path to
 const COMMAND_LATEST_FLAG = '--latest'
 const COMMAND_FIRST_FLAG = '--first'
 const COMMAND_LAST_FLAG = '--last'
-const COMMAND_USAGE = 'usage: /import-session [--latest | --first N | --last N] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end, --first N the opening N exchanges, --last N the most recent N exchanges'
+const COMMAND_USAGE = 'usage: /import-session [--latest | --first N | --last N] <claude|codex|path-to-session.jsonl> [topic keywords] — "claude"/"codex" imports the newest session for the current project; with keywords the best topic match across all of that origin\'s sessions is imported; --latest keeps only the last user message through the session end, --first N the opening N exchanges, --last N the most recent N exchanges; anything typed after the first line is submitted to the model as your instruction once the import lands'
 
 const TOOL_SPECIFIER_DESCRIPTION = 'Specifier to import: "claude" or "codex" for the newest session of the current project, or a path to a session .jsonl file under the configured roots.'
 const TOOL_QUERY_DESCRIPTION = 'Optional topic keywords. With "claude"/"codex", the best-matching session topic across all of that origin\'s sessions is imported instead of the newest one; the result lists the other matches.'
 const TOOL_SCOPE_DESCRIPTION = 'Import scope. "full" (default) imports the whole session transcript. "latest" imports only the latest exchange — the last user message through the end of the session — which fits questions like "what did it just do". "first" imports the opening exchanges and "last" the most recent ones, each requiring the exchanges count.'
 const TOOL_EXCHANGES_DESCRIPTION = 'Exchange count for scope "first"/"last": how many exchanges to import, where one exchange is a user message plus the assistant reply and tool calls that follow it. Required with those scopes; must not accompany "full"/"latest".'
 const TOOL_DESCRIPTION = 'Import one Claude Code or Codex session transcript from this machine as bounded text. Use it when the user points at work done in another agent (a Claude or Codex session) and wants to continue from it. Pass scope="latest" when the user asks what the other agent just did, scope="first"/"last" with an exchanges count for a bounded window of exchanges, and leave the default when they want the whole session\'s arc.'
-const SEARCH_TOOL_DESCRIPTION = 'Search Claude Code or Codex session logs by topic keywords and return the matching sessions WITHOUT importing them. When the user describes prior work in another agent only vaguely, search first, present the matches (through ask_user_question when the user should choose), then call import_foreign_session with the chosen path(s).'
+const SEARCH_TOOL_DESCRIPTION = 'Search Claude Code or Codex session logs by topic keywords and return the matching sessions WITHOUT importing them. Terms match a session\'s topic first (its summary or first user message); when no topic matches, they are matched against the session\'s opening content instead, which finds sessions whose relevant material sits deeper in the conversation. When the user describes prior work in another agent only vaguely, search first, present the matches (through ask_user_question when the user should choose), then call import_foreign_session with the chosen path(s).'
 
 /** One prepared import shared by all three surfaces. */
 interface PreparedImport {
@@ -380,7 +380,11 @@ export function apply(ctx: Context, config: Config): void {
     description: COMMAND_DESCRIPTION,
     input: { hint: COMMAND_HINT },
     handler: async ({ agent, rawInput, signal }): Promise<CommandResult> => {
-      const tokens = rawInput.trim().split(/\s+/u).filter(token => token !== '')
+      // First line: specifier, scope flags, and topic keywords. Every line
+      // after it is the user's instruction for the model, not search input.
+      const [requestLine, ...instructionLines] = rawInput.split('\n')
+      const instruction = instructionLines.join('\n').trim()
+      const tokens = (requestLine ?? '').trim().split(/\s+/u).filter(token => token !== '')
       let scope: ForeignTranscriptScope = 'full'
       let exchanges: number | undefined
       const locating: string[] = []
@@ -446,6 +450,17 @@ export function apply(ctx: Context, config: Config): void {
       }
       const importedList = preparedImports.map(prepared => renderSuccess(prepared)).join('\n')
       const alternatives = renderCandidates(candidates)
+      if (instruction !== '') {
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: instruction }],
+          source: { kind: 'user' },
+        }))
+        return {
+          kind: 'success',
+          text: `${importedList} Your instruction rides the next turn.`
+            + (alternatives === '' ? '' : `\nOther topic matches:\n${alternatives}`),
+        }
+      }
       return {
         kind: 'success',
         text: `${importedList} Each import will accompany your next message; ask your question to continue.`
@@ -602,7 +617,7 @@ export function apply(ctx: Context, config: Config): void {
               properties: {
                 path: { type: 'string', required: true },
                 topic: { type: 'string', required: true },
-                topicSource: { type: 'string', required: true, enum: ['summary', 'first-user-message'] },
+                topicSource: { type: 'string', required: true, enum: ['summary', 'first-user-message', 'content'] },
                 startedAt: { type: 'string' },
                 cwd: { type: 'string' },
               },

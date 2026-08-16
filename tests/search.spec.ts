@@ -192,3 +192,46 @@ describe('Codex bootstrap depth', () => {
     }
   })
 })
+
+describe('content fallback', () => {
+  it('matches terms against the head text when no topic matches', async () => {
+    const box = await sandbox()
+    try {
+      await write(
+        join(box.codexRoot, '2026', '08', '15', 'rollout-content.jsonl'),
+        codexSession('ship the ordinary release', '/work/project')
+          + JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'text', text: 'the exotic milestone plan lives here' }] } }) + '\n',
+        0,
+      )
+      const found = await searchForeignSessions({ origin: 'codex', query: 'exotic milestone', config: box.config, signal: undefined })
+      expect(found).toHaveLength(1)
+      expect(found[0]?.topicSource).toBe('content')
+      expect(found[0]?.topic).toBe('ship the ordinary release')
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it('prefers topic matches and leaves content-only sessions out when a topic matches', async () => {
+    const box = await sandbox()
+    try {
+      await write(
+        join(box.codexRoot, '2026', '08', '15', 'rollout-topic.jsonl'),
+        codexSession('ship the exotic release', '/work/project'),
+        0,
+      )
+      await write(
+        join(box.codexRoot, '2026', '08', '15', 'rollout-deep-content.jsonl'),
+        codexSession('unrelated opening', '/work/project')
+          + JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'text', text: 'mentions exotic deep inside' }] } }) + '\n',
+        60,
+      )
+      const found = await searchForeignSessions({ origin: 'codex', query: 'exotic', config: box.config, signal: undefined })
+      expect(found).toHaveLength(1)
+      expect(found[0]?.topicSource).toBe('first-user-message')
+      expect(found[0]?.topic).toBe('ship the exotic release')
+    } finally {
+      await box.cleanup()
+    }
+  })
+})

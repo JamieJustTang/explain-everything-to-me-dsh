@@ -5,9 +5,11 @@ import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry, { agentEvents, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import { CallId, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService, { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -65,11 +67,14 @@ async function harness(): Promise<Harness> {
   const claudeRoot = join(root, 'claude-projects')
   const codexRoot = join(root, 'codex-sessions')
   const ctx = new Context()
+  await ctx.plugin(LlmRuntime)
+  await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(UserQuestionService)
+  await ctx.plugin(AgentLoop, { agents: [] })
   const asked = { questions: [] as unknown[] }
   ctx.userQuestions.registerProvider({
     ask: async (request) => {
@@ -285,14 +290,18 @@ describe('/import-session command', () => {
         join('-work-project', 'topic-other.jsonl'),
         CLAUDE_SESSION.replace('ship it', 'ship the parser rewrite'),
       )
-      const agent = stubAgent('/work/project')
+      const agent = (await test.ctx.agents.create({
+        sessionId: SessionId('ft-ask-best'),
+        meta: { cwd: '/work/project' },
+      })).agent
+      const injectSpy = vi.spyOn(agent, 'inject')
       const execution = await test.ctx.commands.execute(agent, '/import-session claude parser', SIGNAL)
       expect(execution?.result.kind).toBe('success')
       if (execution?.result.kind !== 'success') throw new Error('expected success')
       expect(execution.result.text).toContain(best)
       expect(execution.result.text).toContain('Other topic matches:')
       expect(execution.result.text).toContain(other)
-      expect(agent.inject).toHaveBeenCalledTimes(1)
+      expect(injectSpy).toHaveBeenCalledTimes(1)
     } finally {
       await test.cleanup()
     }
@@ -312,7 +321,11 @@ describe('/import-session command', () => {
         CLAUDE_SESSION.replace('ship it', 'ship the parser rewrite'),
       )
       askBehavior.selected = ['2. ship the parser rewrite', '1. Parser hardening rollout']
-      const agent = stubAgent('/work/project')
+      const agent = (await test.ctx.agents.create({
+        sessionId: SessionId('ft-ask-multi'),
+        meta: { cwd: '/work/project' },
+      })).agent
+      const injectSpy = vi.spyOn(agent, 'inject')
       const execution = await test.ctx.commands.execute(agent, '/import-session claude parser', SIGNAL)
       expect(execution?.result.kind).toBe('success')
       expect(test.asked.questions).toHaveLength(1)
@@ -322,8 +335,8 @@ describe('/import-session command', () => {
         '1. Parser hardening rollout',
         '2. ship the parser rewrite',
       ])
-      expect(agent.inject).toHaveBeenCalledTimes(2)
-      const injectedPaths = agent.inject.mock.calls.map(call => (call[0] as { source: { path: string } }).source.path)
+      expect(injectSpy).toHaveBeenCalledTimes(2)
+      const injectedPaths = injectSpy.mock.calls.map(call => (call[0] as { source: { path: string } }).source.path)
       expect(injectedPaths).toEqual([second, first])
       expect(execution?.result.kind === 'success' && execution.result.text).toContain(second)
     } finally {
@@ -339,10 +352,14 @@ describe('/import-session command', () => {
         join('-work-project', 'only-one.jsonl'),
         CLAUDE_SESSION.replace('ship it', 'ship the parser rewrite'),
       )
-      const agent = stubAgent('/work/project')
+      const agent = (await test.ctx.agents.create({
+        sessionId: SessionId('ft-ask-fallback'),
+        meta: { cwd: '/work/project' },
+      })).agent
+      const injectSpy = vi.spyOn(agent, 'inject')
       await test.ctx.commands.execute(agent, '/import-session claude parser', SIGNAL)
       expect(test.asked.questions).toHaveLength(0)
-      expect(agent.inject).toHaveBeenCalledTimes(1)
+      expect(injectSpy).toHaveBeenCalledTimes(1)
 
       await writeSession(
         test.claudeRoot,
@@ -354,8 +371,8 @@ describe('/import-session command', () => {
       expect(aborted?.result.kind).toBe('success')
       if (aborted?.result.kind !== 'success') throw new Error('expected success')
       expect(aborted.result.text).toContain('Other topic matches:')
-      expect(agent.inject).toHaveBeenCalledTimes(2)
-      const lastInjected = agent.inject.mock.calls.at(-1)?.[0] as { source: { path: string } }
+      expect(injectSpy).toHaveBeenCalledTimes(2)
+      const lastInjected = injectSpy.mock.calls.at(-1)?.[0] as { source: { path: string } }
       expect(lastInjected.source.path).toContain('second-match.jsonl')
     } finally {
       await test.cleanup()

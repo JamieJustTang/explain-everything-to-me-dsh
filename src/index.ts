@@ -21,7 +21,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -255,6 +255,8 @@ function candidateLabel(candidate: ForeignSessionCandidate, index: number): stri
  * importing the best match unasked.
  *
  * @param ctx - plugin context carrying an optionally composed userQuestions service.
+ * @param agent - the live root agent owning the session the command runs on;
+ * web-UI providers route the question through it.
  * @param origin - origin keyword that was searched.
  * @param query - topic keywords that produced the candidates.
  * @param candidates - ranked search results.
@@ -263,6 +265,7 @@ function candidateLabel(candidate: ForeignSessionCandidate, index: number): stri
  */
 async function askWhichSessions(
   ctx: Context,
+  agent: Agent,
   origin: ForeignTranscriptOrigin,
   query: string,
   candidates: readonly ForeignSessionCandidate[],
@@ -273,6 +276,7 @@ async function askWhichSessions(
   try {
     const labels = candidates.map(candidateLabel)
     const answer = await userQuestions.ask({
+      agent,
       questions: [{
         id: 'foreign-transcript-pick',
         question: `Several ${origin} sessions match ${JSON.stringify(query)}. Which should be imported?`,
@@ -431,7 +435,7 @@ export function apply(ctx: Context, config: Config): void {
           }
           const chosen = candidates.length === 1
             ? [candidates[0] as ForeignSessionCandidate]
-            : await askWhichSessions(ctx, parsed.origin, query, candidates, signal) ?? [candidates[0] as ForeignSessionCandidate]
+            : await askWhichSessions(ctx, agent, parsed.origin, query, candidates, signal) ?? [candidates[0] as ForeignSessionCandidate]
           preparedImports = await Promise.all(chosen.map(
             candidate => prepareImport(candidate.path, agent.session.header.cwd ?? process.cwd(), resolved, signal, scope, exchanges),
           ))

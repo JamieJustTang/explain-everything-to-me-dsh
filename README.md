@@ -48,7 +48,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 
 推荐安装 [decision-one-by-one](https://github.com/JamieJustTang/decision-one-by-one)：
 它把这段流程固化为技能——一次一问、选项含义与代价、拍板复述、最后产出决策总账并入档
-`docs/DECISIONS.md`。该技能从一段真实会话提炼，场景描述见其仓库。
+你的决策文件。该技能从一段真实会话提炼，场景描述见其仓库。
 
 ### 3. 带走决策：「把刚才的拍板存成工作文档」
 

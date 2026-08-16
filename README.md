@@ -129,7 +129,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
    `"@deepseek-ai/dsh-foreign-transcript": "workspace:^"`，然后 `pnpm install`。
 5. `pnpm dsh web`（或在 headless 任务文本里用 `foreign-session:` 引用）。
 
-包内 API 文档见 [PLUGIN.md](PLUGIN.md)（[中文](PLUGIN.zh.md)）。真实使用中踩过的坑与排障方法见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。上游发包后，将支持
+包内 API 文档见 [PLUGIN.md](PLUGIN.md)（[中文](PLUGIN.zh.md)）。上游发包后，将支持
 `dsh plugin add JamieJustTang/explain-everything-to-me-dsh` 一键安装。
 
 ## 状态与致谢

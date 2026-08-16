@@ -74,12 +74,12 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 
 | 指标 | 改进前 | 改进后 | 变化 |
 |---|---:|---:|---|
-| 英文词密度（个/百字） | 27.7 | 7.7 | **-72%** |
-| 列表条目为完整句（有谓语） | 2/13 | 13/13 | **+85 个百分点** |
+| 英文词密度（个/百字） | 31.5 | 16.1 | **-49%** |
+| 列表条目含谓语（完整句） | 4/13 | 12/13 | **+62 个百分点** |
 | 事实保留 | — | 全部 | 100% |
 
 改进前：`M3 五专家 exact prompt + egress manifest`（术语堆叠、不成句）。
-改进后：`五位专家评审的提示词定稿，以及对外发送清单（egress manifest）`。
+改进后（deepseek-v4-pro 实际输出）：`已交付 M3 五名专家的精确提示词（exact prompt）与出站清单（egress manifest）`。
 
 完整对照与方法见 [ste-language-improvement](https://github.com/JamieJustTang/ste-language-improvement#效果实测)。
 

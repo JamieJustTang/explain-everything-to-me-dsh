@@ -31,7 +31,7 @@ describe('resolveConfig', () => {
       maxMentionsPerMessage: DEFAULT_MAX_MENTIONS_PER_MESSAGE,
       latestScanLimit: 200,
       maxToolBriefChars: DEFAULT_MAX_TOOL_BRIEF_CHARS,
-      searchHeadBytes: 32_768,
+      searchHeadBytes: 262_144,
       searchResults: 5,
     })
     expect(resolveConfig({ claudeProjectsRoot: '/c', latestScanLimit: 5 })).toMatchObject({

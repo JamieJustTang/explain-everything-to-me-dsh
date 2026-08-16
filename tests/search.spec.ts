@@ -150,3 +150,45 @@ describe('searchForeignSessions', () => {
     }
   })
 })
+
+describe('Codex bootstrap depth', () => {
+  it('reads past an opening instruction block larger than the legacy head cap', async () => {
+    const box = await sandbox()
+    try {
+      const meta = JSON.stringify({
+        type: 'session_meta',
+        payload: { id: 'c-deep', cwd: '/work/project', instructions: 'x'.repeat(48_000) },
+      })
+      const user = JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'explain the merged CHI plan' }] },
+      })
+      const path = join(box.codexRoot, '2026', '08', '15', 'rollout-deep.jsonl')
+      await write(path, `${meta}\n${user}\n`, 0)
+      const found = await searchForeignSessions({ origin: 'codex', query: 'merged', config: box.config, signal: undefined })
+      expect(found).toHaveLength(1)
+      expect(found[0]?.topic).toContain('merged CHI plan')
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it('still finds nothing when the head cap cannot reach the first user message', async () => {
+    const box = await sandbox({ searchHeadBytes: 32_768 })
+    try {
+      const meta = JSON.stringify({
+        type: 'session_meta',
+        payload: { id: 'c-deep', cwd: '/work/project', instructions: 'x'.repeat(48_000) },
+      })
+      const user = JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'explain the merged CHI plan' }] },
+      })
+      const path = join(box.codexRoot, '2026', '08', '15', 'rollout-deep.jsonl')
+      await write(path, `${meta}\n${user}\n`, 0)
+      expect(await searchForeignSessions({ origin: 'codex', query: 'merged', config: box.config, signal: undefined })).toHaveLength(0)
+    } finally {
+      await box.cleanup()
+    }
+  })
+})

@@ -15,7 +15,14 @@ import type { ForeignTranscript } from './types.ts'
  * Tags wrapping machine-injected user-role content that is not a human turn.
  * Their payloads are session bootstrap material, not conversation.
  */
-const SYSTEM_USER_TAGS = /^<(?:environment_context|user_instructions|turn_context|permissions|ide_context|skill_context)[\s>]/u
+const SYSTEM_USER_TAGS
+  = /^<(?:environment_context|user_instructions|turn_context|permissions|ide_context|skill_context|recommended_plugins)[\s>]/u
+
+/**
+ * Untagged machine-injected user openers: project instruction dumps and the
+ * replay wrapper Codex writes when a session continues another agent's work.
+ */
+const SYSTEM_USER_OPENERS = /^(?:# AGENTS\.md instructions for |The following is the Codex agent history )/u
 
 /** One content block of a Codex message; fields are probed per kind. */
 interface CodexBlock {
@@ -48,7 +55,8 @@ interface CodexRecord {
 /**
  * Parse one Codex rollout log into the neutral transcript model.
  *
- * Keeps `response_item` messages (skipping machine-injected tagged user
+ * Keeps `response_item` messages (skipping machine-injected user content: tagged
+ * bootstrap blocks, project instruction dumps, and replay wrappers
  * content), function/shell/custom tool-call one-liners, and `compacted`
  * summaries. Reasoning payloads and tool outputs are skipped, and `event_msg`
  * rows are skipped because they duplicate the `response_item` stream.
@@ -94,7 +102,8 @@ export function parseCodexTranscript(text: string, briefLimit: number): ForeignT
         if (type === 'message') {
           const role = payload?.role
           const body = messageText(payload)
-          if (body === '' || (typeof role === 'string' && SYSTEM_USER_TAGS.test(body))) break
+          if (body === '' || (typeof role === 'string'
+            && (SYSTEM_USER_TAGS.test(body) || SYSTEM_USER_OPENERS.test(body)))) break
           if (role === 'user') state.items.push({ kind: 'user', text: body })
           else if (role === 'assistant') state.items.push({ kind: 'assistant', text: body })
         } else if (type === 'function_call') {

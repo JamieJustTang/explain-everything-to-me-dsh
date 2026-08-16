@@ -16,8 +16,13 @@ export const DEFAULT_MAX_MENTIONS_PER_MESSAGE = 3
 export const DEFAULT_LATEST_SCAN_LIMIT = 200
 /** Default character cap for one tool-call brief line. */
 export const DEFAULT_MAX_TOOL_BRIEF_CHARS = 120
-/** Default byte cap on the head read used to extract one session's topic. */
-export const DEFAULT_SEARCH_HEAD_BYTES = 32_768
+/**
+ * Default byte cap on the head read used to extract one session's topic. Must
+ * clear Codex's bootstrap: current rollouts open with a 20–50 KB instruction
+ * block and can bury the first user message beyond 130 KB, so a short head
+ * read yields no topic at all.
+ */
+export const DEFAULT_SEARCH_HEAD_BYTES = 262_144
 /** Default candidate count returned by one topic search. */
 export const DEFAULT_SEARCH_RESULTS = 5
 

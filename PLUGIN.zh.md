@@ -27,7 +27,7 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 
 ## 题目检索
 
-在 `claude`/`codex` 关键字后跟题目关键词(`/import-session claude parser fix`,或工具的 `query` 参数),即可按"这个会话是关于什么"而不是按路径选择会话。一个会话的题目是文件头部第一条 summary 行(Claude 的 `summary` 行、Codex 的 `compacted` 行),没有 summary 时是首条人类用户消息;每个候选文件的头部最多读取 `searchHeadBytes` 字节。查询匹配要求每个空白分隔的词都出现在题目中(不区分大小写);summary 匹配优先于首条用户消息匹配,再按新旧排序。检索覆盖该来源根下的所有项目目录、按新到旧的 `latestScanLimit` 个文件。`/import-session` 命令命中多个匹配时会询问导入哪些——经 `userQuestions` 服务抛出多选题,用户用自然语言确认一条或几条,命令精确导入所选;没有 UI 供应方(headless 运行)或问题被关闭时,回退为导入最佳匹配并列出其余 `searchResults` 个候选。模型侧 `search_foreign_sessions` 只返回排序列表不导入:模型把它呈现给用户(通常配合 `ask_user_question`),再用选中的路径(一条或多条)调用 `import_foreign_session`。无匹配时响亮失败;题目关键词必须搭配来源关键字——显式路径加关键词会被拒绝。
+在 `claude`/`codex` 关键字后跟题目关键词(`/import-session claude parser fix`,或工具的 `query` 参数),即可按"这个会话是关于什么"而不是按路径选择会话。一个会话的题目是文件头部第一条 summary 行(Claude 的 `summary` 行、Codex 的 `compacted` 行),没有 summary 时是首条人类用户消息;每个候选文件的头部最多读取 `searchHeadBytes` 字节(取值需越过 Codex 开头的指令块,首条用户消息可埋在 130 KB 之外)。查询匹配要求每个空白分隔的词都出现在题目中(不区分大小写);summary 匹配优先于首条用户消息匹配,再按新旧排序。检索覆盖该来源根下的所有项目目录、按新到旧的 `latestScanLimit` 个文件。`/import-session` 命令命中多个匹配时会询问导入哪些——经 `userQuestions` 服务抛出多选题,用户用自然语言确认一条或几条,命令精确导入所选;没有 UI 供应方(headless 运行)或问题被关闭时,回退为导入最佳匹配并列出其余 `searchResults` 个候选。模型侧 `search_foreign_sessions` 只返回排序列表不导入:模型把它呈现给用户(通常配合 `ask_user_question`),再用选中的路径(一条或多条)调用 `import_foreign_session`。无匹配时响亮失败;题目关键词必须搭配来源关键字——显式路径加关键词会被拒绝。
 
 ## 投影与保留
 
@@ -43,7 +43,7 @@ specifier 为 `claude`、`codex` 或会话文件路径。来源关键字定位�
 | `maxMentionsPerMessage` | `3` | 一条用户消息至多引用的外部会话数;上限 `5`。 |
 | `latestScanLimit` | `200` | 定位最新 Codex 会话时按新到旧检查的 rollout 文件数;同样约束一次题目检索。 |
 | `maxToolBriefChars` | `120` | 一行工具调用摘要的字符上限。 |
-| `searchHeadBytes` | `32768` | 提取一个会话题目时读取头部的字节上限。 |
+| `searchHeadBytes` | `262144` | 提取一个会话题目时读取头部的字节上限;必须越过 Codex 开头的指令块(20–50 KB,首条用户消息可埋在 130 KB 之外)。 |
 | `searchResults` | `5` | 一次题目检索返回的候选数。 |
 
 ## Model Experience

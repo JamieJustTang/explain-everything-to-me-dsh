@@ -92,7 +92,11 @@ export interface Config {
   latestScanLimit?: number
   /** Character cap for one tool-call brief line in the rendered transcript. */
   maxToolBriefChars?: number
-  /** Byte cap on the head read used to extract one session's topic. */
+  /**
+   * Byte cap on the head read used to extract one session's topic. Must clear
+   * Codex's opening instruction block (20-50 KB; the first user message can sit
+   * beyond 130 KB), or no topic is found at all.
+   */
   searchHeadBytes?: number
   /** Candidate count returned by one topic search. */
   searchResults?: number
@@ -109,6 +113,9 @@ export const Config: z<Config> = z.object({
   searchHeadBytes: z.number().step(1).min(1),
   searchResults: z.number().step(1).min(1),
 })
+
+/** Guidance appended to every no-topic-match failure. */
+const NO_TOPIC_MATCH_HINT = ' — every whitespace-separated term must appear in the session\'s topic (its summary or first user message); try fewer, more distinctive keywords'
 
 const COMMAND_NAME = 'import-session'
 const COMMAND_DESCRIPTION = 'Import a Claude Code or Codex session transcript from this machine as conversation context'
@@ -205,7 +212,7 @@ async function searchAndPrepare(
   const best = candidates[0]
   if (best === undefined) {
     throw new ForeignTranscriptError(
-      `no ${origin} session topic matches ${JSON.stringify(query)}`,
+      `no ${origin} session topic matches ${JSON.stringify(query)}${NO_TOPIC_MATCH_HINT}`,
       'FOREIGN_TRANSCRIPT_NOT_FOUND',
     )
   }
@@ -414,7 +421,7 @@ export function apply(ctx: Context, config: Config): void {
           candidates = await searchForeignSessions({ origin: parsed.origin, query, config: resolved, signal })
           if (candidates.length === 0) {
             throw new ForeignTranscriptError(
-              `no ${parsed.origin} session topic matches ${JSON.stringify(query)}`,
+              `no ${parsed.origin} session topic matches ${JSON.stringify(query)}${NO_TOPIC_MATCH_HINT}`,
               'FOREIGN_TRANSCRIPT_NOT_FOUND',
             )
           }

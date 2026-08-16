@@ -171,3 +171,22 @@ describe('parseCodexTranscript', () => {
       .toThrow(/no recognizable Codex session records/u)
   })
 })
+
+describe('parseCodexTranscript machine openers', () => {
+  it('skips untagged instruction dumps and replay wrappers as user content', () => {
+    const item = (text: string): unknown => ({
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+    })
+    const text = lines(
+      { type: 'session_meta', payload: { id: 'c-openers', cwd: '/work/project' } },
+      item('<recommended_plugins>\nplugin list\n</recommended_plugins>'),
+      item('# AGENTS.md instructions for /work/project\n\nbe careful'),
+      item('The following is the Codex agent history whose request actions are being replayed.'),
+      item('解释GPT提出的这个整合版方案，从我们的研究idea开始'),
+    )
+    const transcript = parseCodexTranscript(text, 120)
+    expect(transcript.items).toHaveLength(1)
+    expect(transcript.items[0]).toEqual({ kind: 'user', text: '解释GPT提出的这个整合版方案，从我们的研究idea开始' })
+  })
+})

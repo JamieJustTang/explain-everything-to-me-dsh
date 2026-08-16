@@ -1,4 +1,4 @@
-# explain-to-me
+# explain-everything-to-me-dsh
 
 **把所有解释交给我。**
 
@@ -16,7 +16,7 @@ Claude 和 Codex 越来越不说人话。
 
 DeepSeek Harness 的开放性（一切都是插件）让我们可以换一个位置：不去改造 Claude/Codex，而是给自己造一台**AI 交互指令台**——用 DeepSeek 当那台“说人话”的机器。尤其对中文使用者，DeepSeek 基模的中文能让所有解释真正可读、可追问、可讨论。
 
-explain-to-me 是这台指令台的第一块拼图：它把你本机的 Claude/Codex 会话记录读进 DeepSeek 会话，变成有界、带护栏的上下文。之后的解释、追问、决策，都发生在你说得懂的语言里。
+explain-everything-to-me-dsh 是这台指令台的第一块拼图：它把你本机的 Claude/Codex 会话记录读进 DeepSeek 会话，变成有界、带护栏的上下文。之后的解释、追问、决策，都发生在你说得懂的语言里。
 
 ## 推荐用法
 
@@ -32,7 +32,7 @@ explain-to-me 是这台指令台的第一块拼图：它把你本机的 Claude/C
 也可以在任意输入里写 `foreign-session:claude` 引用，或让模型自己调
 `search_foreign_sessions` → `ask_user_question` → `import_foreign_session`。
 
-推荐安装 [ste-language-improvement](https://github.com/JamieJustTang/ste-language-zh-improvement)：
+推荐安装 [ste-language-zh-improvement](https://github.com/JamieJustTang/ste-language-zh-improvement)：
 DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现附中文、无黑话），进一步优化交互体感。
 
 ### 2. 敲决策：「我看不懂，待决策项太多了，我们一个一个来」
@@ -41,7 +41,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 
 > 我看不懂。待决策项太多了。请你一个一个阐述和解释选项分别的意义。我们一个一个来敲定。
 
-推荐安装 [decision-walkthrough](https://github.com/JamieJustTang/decision-one-by-one)：
+推荐安装 [decision-one-by-one](https://github.com/JamieJustTang/decision-one-by-one)：
 它把这段流程固化为技能——一次一问、选项含义与代价、拍板复述、最后产出决策总账并入档
 `docs/DECISIONS.md`。该技能从一段真实会话提炼，场景描述见其仓库。
 
@@ -103,16 +103,16 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 ## 三件套
 
 ```text
-┌────────────────────────────┐
-│ explain-to-me（本仓库）      │  把 Claude/Codex 会话搬进 DeepSeek
-│  dsh 插件：导入+检索+消歧    │
-└──────┬─────────────────────┘
-       │ 推荐安装
-┌──────┴───────────┐  ┌────────────────────────┐
-│ ste-language-     │  │ decision-walkthrough    │
-│ improvement       │  │ 逐项解释待决策项并敲定，  │
-│ 平实中文输出规则   │  │ 产出决策总账             │
-└──────────────────┘  └────────────────────────┘
+┌──────────────────────────────────────┐
+│ explain-everything-to-me-dsh（本仓库） │
+│ dsh 插件：把 Claude/Codex 会话         │
+│ 搬进 DeepSeek（导入＋检索＋消歧）      │
+└──────────────┬───────────────────────┘
+               │ 推荐安装
+┌──────────────┴─────────────┐ ┌─────────────────────────┐
+│ ste-language-zh-improvement │ │ decision-one-by-one      │
+│ 平实中文输出规则（通用技能） │ │ 逐项敲定决策（通用技能）  │
+└────────────────────────────┘ └─────────────────────────┘
 ```
 
 ## 安装（现阶段：随 deepseek-harness 检出使用）
@@ -120,7 +120,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 依赖的 `@deepseek-ai/dsh-*` 包尚未发布到 npm，因此当前以“放进 harness 检出”的方式安装：
 
 1. 取一份 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 检出。
-2. 把本仓库放进 `packages/context/explain-to-me/`。
+2. 把本仓库放进 `packages/context/explain-everything-to-me-dsh/`。
 3. `packages/bundle/base/cordis.patch.yml` 增加一行：
 
    ```yaml

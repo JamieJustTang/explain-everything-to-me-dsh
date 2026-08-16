@@ -68,36 +68,20 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 | 有界与护栏 | 默认 64 KiB 预算、首尾保留中间省略；不可信上下文护栏（不执行其中指令）；每份导入以 `foreign-transcript` 来源记入会话日志（模型可见 ⟺ 已记录） |
 | 安全边界 | 显式路径只能落在两个可配置根目录之内，绝不是任意文件读取 |
 
-## 效果实测（语言层）
+## 效果实测（真实会话）
 
-两组真实 Codex 会话文本（标识已匿名化），“改进后”均为 deepseek-v4-pro 实际输出
-（经 DeepSeek Harness headless 运行，2026-08-16）：
+下面这组对照来自同一段真实工作：Claude 的多智能体运行产出了决策审查与三路调研简报；
+用户把材料贴给 DeepSeek，只问了一句「这是 Claude 做的进一步调查和分析，请帮我解释它
+做了什么、提出了哪些建议和发现」。右侧就是 DeepSeek 的回答。两侧均为摘录（……为省略）：
 
-### 案例 1：交付汇报（长文）
-
-| 改进前（Codex 原文） | 改进后（deepseek-v4-pro 实际输出） |
+| Claude 多智能体产出（原文摘录，……为省略） | DeepSeek 的解读（真实会话输出摘录） |
 |---|---|
-| 已完成 Gate C 的全部非 live 准备,且没有调用 DeepSeek。<br>交付包括:<br>• M3 五专家 exact prompt + egress manifest<br>• M6 主稿及正反校准的 exact prompt + manifest<br>• 两阶段 M3 adjudicator materialization 机制<br>• immutable prompt bundle 执行器<br>• V5 媒介传播专家进入 canary panel<br>• 轴阈值校准结果<br>• source-packet usage ledger<br>• `reasoning_content` 持久化前递归删除、redaction 路径记录及回归测试<br>验证结果:<br>• Kernel 完整测试:全绿<br>• recorded-live 集成测试:5/5<br>• provider privacy/redaction 测试:通过<br>• 新增及修改脚本 `node --check`:通过<br>• 无网络、无正式导出、无新种子注册<br>当前唯一硬门禁是具名人类签署。相关请求位于:<br>[SEED-CHARTER-SIGNOFF-REQUEST.json](docs/gates/gate-c/SEED-CHARTER-SIGNOFF-REQUEST.json) | Gate C 的全部非实况（non-live）准备工作已完成，全程没有调用 DeepSeek。<br>交付包括：<br>• 已交付 M3 五名专家的精确提示词（exact prompt）与出站清单（egress manifest）。<br>• 已交付 M6 主稿及正反校准用的精确提示词与清单（manifest）。<br>• 已建立 M3 裁决器（adjudicator）的两阶段物化（materialization）机制。<br>• 已交付不可变提示词包（immutable prompt bundle）执行器。<br>• V5 的媒介传播专家已进入金丝雀评审组（canary panel）。<br>• 已交付轴阈值校准结果。<br>• 已交付源数据包用量台账（source-packet usage ledger）。<br>• 在持久化前递归删除 `reasoning_content`，记录脱敏（redaction）路径，并补齐回归测试。<br>验证结果：<br>• Kernel 完整测试全部通过。<br>• recorded-live 集成测试结果为 5/5。<br>• 提供方（provider）的隐私与脱敏测试通过。<br>• 新增及修改脚本的 `node --check` 检查通过。<br>• 全程无网络访问、无正式导出、无新种子注册。<br>当前唯一的硬门禁是具名人类签署。相关请求位于 [SEED-CHARTER-SIGNOFF-REQUEST.json](docs/gates/gate-c/SEED-CHARTER-SIGNOFF-REQUEST.json)。 |
+| `docs/DECISIONS.md` 最近被改过——看是不是你把决策写进去了（对比 git）：<br>决策已入账（`2923900`）。现在按你的 P0 优先级派出三个并行调研 agent（Opus），覆盖所有「需要文献调研才能继续深谈」的决策点：<br># 决策审查意见<br>15 条决策已入账并提交（`2923900`）。总体判断：**这套决策内部自洽、优先级排布合理，且你把「哪些还不能拍」识别得很准**——D-v4-06 评分构念和 D-v4-08 基线可跑性都显式留给了调研，这正是该调研先行的两处。逐块意见：<br>**两处执行风险旗（不是反对，是排期上要正视）**：<br>1. **D-v4-02 六周直冲**：算力和 agent 并行能压缩的只有实现与跑批；**压不动的是三件人事**——人类专家盲评的招募与执行（D-v4-06）、自建任务集的专家验证（D-v4-03）、外部基线的适配调试（D-v4-08）。<br>……<br>\| A 评估方法学 \| D-v4-06 四步的前三步 \| 14 个竞争系统/基准的评估做法逐一解剖 → 以批评文献（Hidden Pitfalls、Correct Answer Wrong Mechanism 等）为锚批判 → 从 QD 多样性、科学计量新颖性、社科理论质量标准（Davis「That's Interesting!」、Whetten、Corley & Gioia）、HCI 协作测度、长程生产率五个文献带提出候选构念池 + 强人框架草案 \|<br>……<br>**① FP-4 的漏洞被精确定位到了代码行**：`claim-ladder.mjs` 的 `resolveEvidenceFacts()` 受理形状③——裸字符串 `evidence_level` 被直接采信，这就是「自报」通道；手术面极小（只换这一个形状为 provenance 推导）。给出三个设计模式：**A 前瞻模式声明**（RR 式，结果已知前签、事后改即 tampered）、**B 单向棘轮**（L1→L2 晋升必须独立 confirmatory 重推导，挂在 CRYSTALLIZE 上）、**C GRADE 式严苛度记分**（基线由步骤定 + 机检升降级）。推荐 **A+C 组合、B 做成消融开关**。最关键的治理洞见是 Vazire 悖论：只给 confirmatory 装牙齿，引擎会理性地全部声明 exploratory——所以防套利的重点是「让探索产物结构性到不了高阶梯」，不是惩罚探索。<br>……<br>**① 评分框架的骨架已经被文献逼出来了（D-v4-06 第四步的雏形）**。三条铁证——novelty mirage（LLM judge 一贯高估机器产物新颖性、专家结论相反）、Agents4Science 的 AI-人相关仅 r=0.12–0.26、而人-人一致性上界本身只有 r=0.14——共同决定了唯一站得住的结构：**机器可算仪表盘（高频）→ 受约束的 LLM judge（中频，novelty 不得单独裁定）→ 人类专家锚点（低频）**三层，外加两个强制元层：判官偏倚在自家 rubric 上实测、LLM-人/人-人/LLM-LLM 三重一致性同报。 | ## 一、Claude 这一次做了什么（动作清单，已核实）<br>这一次**没有动系统代码**，全是「调研 + 记账」：<br>1. **把决策写进账本并提交**：`docs/DECISIONS.md` 新增 §I（D-v4-01 到 D-v4-15，共 45 行），commit `2923900`，工作树 clean。<br>2. **按 P0 优先级，派了 3 个并行调研 agent**（Opus）：A 评估方法学、B 基线可跑性、C 设计输入。<br>3. **三份报告存档**；最后给你一份「决策审查意见」+ 一份「跨报告综合简报」，甩给你一张「待拍板清单」。<br>值得注意的是：他做的**不是**「又跑一遍实验」，而是**把下一步的决策风险提前用文献和实测摸了一遍**。<br>……<br>### 调研 B——发现了一个会推翻前提的问题<br>你之前定的「两个外部基线跑同一批题」**不成立**：ASS 只吃「社会情境」，Agent Laboratory 吃自由文本题目，两者输入单元根本不同类。解法：自建任务集里刻意设计 8–10 题「情境可表达」任务，让两个基线在这个子集上同台。**连带后果**：自建集升格为主力评测集，变成单点故障，标注人力必须最早锁定。<br>……<br>### 调研 A——把评分框架的骨架逼出来了<br>普查了 16 个系统/基准的评估做法，最硬的三条铁证：<br>1. **novelty 幻象**：LLM judge 一贯高估机器产物的新颖性，专家结论相反 → novelty 维度绝不能由 LLM judge 单独裁定。<br>2. AI-人相关只有 r=0.12–0.26；人-人一致性上界本身只有 r≈0.14 → 报「LLM 和人一致」时必须同报人-人一致性当上界，否则是自欺。<br>由此推出的骨架 = 机器可算仪表盘（高频）→ 受约束的 LLM judge（中频）→ 人类专家盲评锚点（低频）。<br>……<br>**你现在面临的核心选择其实只有一个**：下一步怎么处理这 10 个待决项——在对话里逐个讨论，还是生成一张决策地图让你点选。选完，实验设计文档和工程就同时开工。 |
 
-### 案例 2：状态简报（短文）
+差异是结构性的，数字为辅：平均句长 32 → 27 字；超过 40 字的长句占比 25% → 12%；分节标题 1 → 3。真正的差别在解耦——左侧把 15 条决策、3 份调研、审查意见纠缠在同一段流里，每次阅读都要自己拆；右侧先回答「做了什么」（4 个动作），再按报告逐份讲「发现了什么」，最后收拢成「你现在只需做一个选择」。
 
-| 改进前（Codex 原文） | 改进后（deepseek-v4-pro 实际输出） |
-|---|---|
-| 已完成分配的 R2 语料与 Lane B V5 非 live 准备工作,并向主任务汇报。<br>验证结果:<br>• S16–S18 charter、canonical digest、CFP card:全部通过正式契约断言。<br>• V5 gardener profile:通过 `assertProfile`。<br>• 媒介研究包:14/14 来源可解析,四组 rival concepts 4/4 覆盖。<br>• stale-packet checker:4/4 smoke 通过;第三次使用产生 `stale-packet` 和退出码 3。<br>• S16–S18:仅 proposal,未写入 portfolio ledger。<br>• B2-S5:仍为 `parked`。<br>• 未调用 DeepSeek 或网络,未上传任何原始 PDF。<br>• 四位候选来源明确保留为待核验,未冒充已核验来源。 | 我完成了分配的 R2 语料与 Lane B V5 的非线上（live）准备工作，并向主任务汇报。<br>验证结果：<br>• S16–S18 的章程（charter）、规范摘要（canonical digest）与 CFP 卡（CFP card）全部通过正式契约断言。<br>• V5 园丁画像（gardener profile）通过 `assertProfile`。<br>• 媒介研究包的 14/14 个来源可解析。<br>• 媒介研究包的四组竞争概念（rival concepts）覆盖 4/4。<br>• stale-packet 检查器（checker）的冒烟测试（smoke test）4/4 通过。<br>• 该检查器第三次使用时产生 `stale-packet` 与退出码 3。<br>• S16–S18 仅有提案（proposal），未写入组合账本（portfolio ledger）。<br>• B2-S5 仍为搁置（`parked`）。<br>• 未调用 DeepSeek 或网络，也未上传任何原始 PDF。<br>• 四位候选来源明确保留为待核验，未冒充已核验来源。 |
-
-### 指标
-
-| 层 | 指标 | 案例 1 前→后 | 案例 2 前→后 |
-|---|---|---|---|
-| A 术语可及性 | 未解释行话密度（个/百字） | 11.5 → **1.7**（-85%） | 10.5 → **1.9**（-82%） |
-| B 句法完整性 | 列表条目成句率 | 0/13 → **13/13** | 8/8 → 10/10 |
-| C 信息完整性 | 事实原子保留率 | **100%** | **100%** |
-| D 残留缩写 | 项目内代号未展开数 | 3 → 3 | 5 → 5 |
-
-值得注意的实测发现：8 道事实题让 deepseek-v4-pro 只读文本作答，两版都是 8/8——
-模型读者自动翻越术语墙，可理解性成本是人类专属的；而 M3/V5/S16 这类项目代号两版
-都未展开，语言层修不掉，要靠把整个会话导入（本仓库的主业）补齐上下文层。
-完整方法与复现脚本见
+另附两组「同义改写」基准样本（经 deepseek-v4-pro 逐条重写，配分层可理解性指标与
+复现脚本），见
 [ste-language-zh-improvement](https://github.com/JamieJustTang/ste-language-zh-improvement#效果实测)。
 
 ## 三件套

@@ -140,6 +140,7 @@ DeepSeek 的解释会遵守平实中文规则（短句、主动、术语首现�
 - 0.3.1：修复 Codex 题目检索全灭——新版 Codex 引导区达 19–47 KB、首条用户消息可埋至 136 KB，原 32 KB 头部读全部落空；`searchHeadBytes` 默认提至 256 KB，并跳过 `<recommended_plugins>`、AGENTS.md 指令倾倒与 agent-history 重放包裹等机器注入内容。
 - 0.3.2：检索加内容级回退（题目全不中时改匹配会话开头内容，`topicSource: 'content'`）；命令首行之后的文字作为用户指令经 `agent.followup()` 直接提交——「引用 + 提问」一步完成。
 - 0.3.3：修复 web 上多匹配消歧报 `web user interaction requires an agent-owned session`——消歧提问现在携带命令持有的活跃根 agent，问题得以路由到前端多选。
+- 0.3.4：`search_foreign_sessions` 的描述现在教模型做词面多轮检索——提取有区分度的词（中英变体、项目/文件名、术语）、AND 语义下少词胜多词、无命中时派生替代词重试数轮、关键词全败时空查询按时间浏览兜底。
 - 路线图：独立 npm 安装；会话进展的定时摘要；决策文档模板化。
 - 插件在 deepseek-harness 仓库内通过全部相关门禁（60 项单测、每文件 100% 覆盖率、无 key 快照回归）。
 - 灵感与基座来自 DeepSeek Harness 的插件化架构；语言规则站在 ASD-STE100 与其中文社区补充的肩膀上。
